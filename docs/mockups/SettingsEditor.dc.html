@@ -1,0 +1,170 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Heimdall settings · Editor</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500&amp;family=JetBrains+Mono:wght@400&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#0E0E0E}
+button{font:inherit;color:inherit;background:none;border:0;padding:0;margin:0;cursor:pointer}
+select{font:inherit;outline:none;appearance:none;-webkit-appearance:none;cursor:pointer}
+a{color:#8A8A8A;text-decoration:none}a:hover{color:#E4E4E4}
+</style>
+</helmet>
+<div style="width: 1100px; height: 680px; box-sizing: border-box; display: flex; flex-direction: column; background: #141414; color: #E4E4E4; font-family: Inter, 'Segoe UI', sans-serif; border: 1px solid #262626; border-radius: 8px; overflow: hidden">
+
+  <div style="height: 44px; display: flex; align-items: center; padding-left: 14px; flex-shrink: 0">
+    <svg width="16" height="16" viewBox="0 0 40 40" fill="none" stroke="#9A9A9A" stroke-width="3" stroke-linecap="round" aria-hidden="true" style="margin-right: 10px"><path d="M7 34V14M33 34V14M7 15C14 6 26 6 33 15M7 25H33"></path></svg>
+    <span style="font-size: 12px; color: #8A8A8A">Settings · personal.heim</span>
+    <div style="flex-grow: 1"></div>
+    <button aria-label="Minimize" style="width: 46px; height: 44px; display: flex; align-items: center; justify-content: center"><svg width="10" height="10" viewBox="0 0 10 10" stroke="#8A8A8A" aria-hidden="true"><path d="M0 5H10"></path></svg></button>
+    <button aria-label="Maximize" style="width: 46px; height: 44px; display: flex; align-items: center; justify-content: center"><svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="#8A8A8A" aria-hidden="true"><rect x="0.5" y="0.5" width="9" height="9"></rect></svg></button>
+    <button aria-label="Close" style="width: 46px; height: 44px; display: flex; align-items: center; justify-content: center"><svg width="10" height="10" viewBox="0 0 10 10" stroke="#8A8A8A" aria-hidden="true"><path d="M0 0L10 10M10 0L0 10"></path></svg></button>
+  </div>
+
+  <div style="flex-grow: 1; display: flex; min-height: 0">
+
+    <nav style="width: 240px; flex-shrink: 0; box-sizing: border-box; padding: 28px 16px; border-right: 1px solid #222222; display: flex; flex-direction: column; gap: 2px; font-size: 13px">
+      <a href="#" style="display: flex; align-items: center; gap: 10px; height: 34px; padding: 0 12px; margin-bottom: 18px; color: #8A8A8A">
+        <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="#8A8A8A" stroke-width="1.3" aria-hidden="true"><path d="M7.5 2L3.5 6L7.5 10"></path></svg>
+        Back to notes
+      </a>
+      <a href="#" style="height: 34px; display: flex; align-items: center; padding: 0 12px; border-radius: 6px">Security</a>
+      <a href="#" style="height: 34px; display: flex; align-items: center; padding: 0 12px; border-radius: 6px">Access</a>
+      <a href="#" style="height: 34px; display: flex; align-items: center; padding: 0 12px; border-radius: 6px; background: #1E1E1E; color: #E4E4E4">Editor</a>
+      <a href="#" style="height: 34px; display: flex; align-items: center; padding: 0 12px; border-radius: 6px">Trash</a>
+      <a href="#" style="height: 34px; display: flex; align-items: center; padding: 0 12px; border-radius: 6px">About</a>
+    </nav>
+
+    <div style="flex-grow: 1; box-sizing: border-box; padding: 40px 72px; display: flex; flex-direction: column; overflow-y: auto">
+      <div style="width: 600px; display: flex; flex-direction: column">
+        <h1 style="margin: 0 0 20px; font-size: 22px; font-weight: 500">Editor</h1>
+
+        <div style="display: flex; flex-direction: column">
+
+          <div style="display: flex; align-items: center; gap: 24px; padding: 13px 0; border-bottom: 1px solid #222222">
+            <div style="flex-grow: 1; display: flex; flex-direction: column; gap: 4px">
+              <label for="font" style="font-size: 14px">Font</label>
+              <span style="font-size: 12px; color: #8A8A8A">Monospace keeps 0/O and l/1/I easy to tell apart.</span>
+            </div>
+            <div style="display: flex; gap: 8px">
+              <div style="position: relative; width: 170px">
+                <select id="font" style="width: 170px; height: 36px; padding: 0 32px 0 12px; background: #1B1B1B; border: 1px solid #2C2C2C; border-radius: 6px; color: #E4E4E4; font-size: 13px">
+                  <option selected>JetBrains Mono</option><option>Consolas</option><option>Inter</option><option>Segoe UI</option>
+                </select>
+                <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="#8A8A8A" stroke-width="1.3" aria-hidden="true" style="position: absolute; right: 12px; top: 13px; pointer-events: none"><path d="M2 3.5L5 6.5L8 3.5"></path></svg>
+              </div>
+              <div style="position: relative; width: 80px">
+                <select aria-label="Font size" style="width: 80px; height: 36px; padding: 0 32px 0 12px; background: #1B1B1B; border: 1px solid #2C2C2C; border-radius: 6px; color: #E4E4E4; font-size: 13px">
+                  <option>12</option><option>13</option><option selected>14</option><option>16</option><option>18</option><option>20</option>
+                </select>
+                <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="#8A8A8A" stroke-width="1.3" aria-hidden="true" style="position: absolute; right: 12px; top: 13px; pointer-events: none"><path d="M2 3.5L5 6.5L8 3.5"></path></svg>
+              </div>
+            </div>
+          </div>
+
+          <div style="display: flex; align-items: center; gap: 24px; padding: 13px 0; border-bottom: 1px solid #222222">
+            <div style="flex-grow: 1; display: flex; flex-direction: column; gap: 4px">
+              <label for="tabs" style="font-size: 14px">Tab key inserts</label>
+            </div>
+            <div style="position: relative; width: 140px">
+              <select id="tabs" style="width: 140px; height: 36px; padding: 0 32px 0 12px; background: #1B1B1B; border: 1px solid #2C2C2C; border-radius: 6px; color: #E4E4E4; font-size: 13px">
+                <option>2 spaces</option><option selected>4 spaces</option><option>8 spaces</option><option>Tab character</option>
+              </select>
+              <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="#8A8A8A" stroke-width="1.3" aria-hidden="true" style="position: absolute; right: 12px; top: 13px; pointer-events: none"><path d="M2 3.5L5 6.5L8 3.5"></path></svg>
+            </div>
+          </div>
+
+          <div style="display: flex; align-items: center; gap: 24px; padding: 13px 0; border-bottom: 1px solid #222222">
+            <div style="flex-grow: 1; display: flex; flex-direction: column; gap: 4px">
+              <label for="eol" style="font-size: 14px">Line endings</label>
+              <span style="font-size: 12px; color: #8A8A8A">Used when copying text out. Notes are always stored as UTF-8.</span>
+            </div>
+            <div style="position: relative; width: 140px">
+              <select id="eol" style="width: 140px; height: 36px; padding: 0 32px 0 12px; background: #1B1B1B; border: 1px solid #2C2C2C; border-radius: 6px; color: #E4E4E4; font-size: 13px">
+                <option selected>Windows (CRLF)</option><option>Unix (LF)</option>
+              </select>
+              <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="#8A8A8A" stroke-width="1.3" aria-hidden="true" style="position: absolute; right: 12px; top: 13px; pointer-events: none"><path d="M2 3.5L5 6.5L8 3.5"></path></svg>
+            </div>
+          </div>
+
+          <div style="display: flex; align-items: center; gap: 24px; padding: 13px 0; border-bottom: 1px solid #222222">
+            <div style="flex-grow: 1; display: flex; flex-direction: column; gap: 4px">
+              <span style="font-size: 14px">Word wrap</span>
+            </div>
+            <button aria-pressed="true" aria-label="Word wrap" style="width: 36px; height: 20px; border-radius: 10px; background: #D4D4D4; display: flex; align-items: center; justify-content: flex-end; padding: 0 3px; box-sizing: border-box">
+              <span style="width: 14px; height: 14px; border-radius: 7px; background: #141414"></span>
+            </button>
+          </div>
+
+          <div style="display: flex; align-items: center; gap: 24px; padding: 13px 0; border-bottom: 1px solid #222222">
+            <div style="flex-grow: 1; display: flex; flex-direction: column; gap: 4px">
+              <span style="font-size: 14px">Line numbers</span>
+            </div>
+            <button aria-pressed="false" aria-label="Line numbers" style="width: 36px; height: 20px; border-radius: 10px; background: #2A2A2A; display: flex; align-items: center; padding: 0 3px; box-sizing: border-box">
+              <span style="width: 14px; height: 14px; border-radius: 7px; background: #8A8A8A"></span>
+            </button>
+          </div>
+
+          <div style="display: flex; align-items: center; gap: 24px; padding: 13px 0; border-bottom: 1px solid #222222">
+            <div style="flex-grow: 1; display: flex; flex-direction: column; gap: 4px">
+              <span style="font-size: 14px">Status bar</span>
+              <span style="font-size: 12px; color: #8A8A8A">Shows the profile, USB key, lock timer and cursor position.</span>
+            </div>
+            <button aria-pressed="true" aria-label="Status bar" style="width: 36px; height: 20px; border-radius: 10px; background: #D4D4D4; display: flex; align-items: center; justify-content: flex-end; padding: 0 3px; box-sizing: border-box">
+              <span style="width: 14px; height: 14px; border-radius: 7px; background: #141414"></span>
+            </button>
+          </div>
+
+          <div style="display: flex; align-items: center; gap: 24px; padding: 13px 0; border-bottom: 1px solid #222222">
+            <div style="flex-grow: 1; display: flex; flex-direction: column; gap: 4px">
+              <span style="font-size: 14px">Spell check</span>
+              <span style="font-size: 12px; color: #8A8A8A">Uses a dictionary bundled with Heimdall. Nothing leaves this device.</span>
+            </div>
+            <button aria-pressed="false" aria-label="Spell check" style="width: 36px; height: 20px; border-radius: 10px; background: #2A2A2A; display: flex; align-items: center; padding: 0 3px; box-sizing: border-box">
+              <span style="width: 14px; height: 14px; border-radius: 7px; background: #8A8A8A"></span>
+            </button>
+          </div>
+
+          <div style="display: flex; align-items: center; gap: 24px; padding: 13px 0; border-bottom: 1px solid #222222">
+            <div style="flex-grow: 1; display: flex; flex-direction: column; gap: 4px">
+              <span style="font-size: 14px">Autosave</span>
+              <span style="font-size: 12px; color: #8A8A8A">Encrypted, a few seconds after you stop typing. Always saves before locking.</span>
+            </div>
+            <button aria-pressed="true" aria-label="Autosave" style="width: 36px; height: 20px; border-radius: 10px; background: #D4D4D4; display: flex; align-items: center; justify-content: flex-end; padding: 0 3px; box-sizing: border-box">
+              <span style="width: 14px; height: 14px; border-radius: 7px; background: #141414"></span>
+            </button>
+          </div>
+
+          <div style="display: flex; align-items: center; gap: 24px; padding: 13px 0">
+            <div style="flex-grow: 1; display: flex; flex-direction: column; gap: 4px">
+              <span style="font-size: 14px">Reopen tabs on unlock</span>
+              <span style="font-size: 12px; color: #8A8A8A">Tab order and cursor positions are kept inside the vault.</span>
+            </div>
+            <button aria-pressed="true" aria-label="Reopen tabs on unlock" style="width: 36px; height: 20px; border-radius: 10px; background: #D4D4D4; display: flex; align-items: center; justify-content: flex-end; padding: 0 3px; box-sizing: border-box">
+              <span style="width: 14px; height: 14px; border-radius: 7px; background: #141414"></span>
+            </button>
+          </div>
+
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1100,"height":680}}'>
+class Component extends DCLogic {
+renderVals() {
+return {};
+}
+}
+</script>
+</body>
+</html>

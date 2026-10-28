@@ -1,0 +1,17 @@
+[workspace]
+resolver = "2"
+members = ["crates/heimdall-core"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "GPL-3.0-only"
+rust-version = "1.82"
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+# Argon2 in an unoptimized build is painfully slow; optimize dependencies
+# even in dev/test builds so the test suite stays fast.
+[profile.dev.package."*"]
+opt-level = 3

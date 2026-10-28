@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Create vault: USB key</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500&amp;family=JetBrains+Mono:wght@400&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#0E0E0E}
+button{font:inherit;color:inherit;background:none;border:0;padding:0;margin:0;cursor:pointer}
+input{font:inherit;outline:none}
+input[type=radio]{accent-color:#E4E4E4;width:16px;height:16px;margin:0}
+a{color:#8A8A8A;text-decoration:none}a:hover{color:#E4E4E4}
+</style>
+</helmet>
+<div style="width: 1100px; height: 680px; box-sizing: border-box; display: flex; flex-direction: column; background: #141414; color: #E4E4E4; font-family: Inter, 'Segoe UI', sans-serif; border: 1px solid #262626; border-radius: 8px; overflow: hidden">
+
+  <div style="height: 44px; display: flex; align-items: center; padding-left: 14px; flex-shrink: 0">
+    <svg width="16" height="16" viewBox="0 0 40 40" fill="none" stroke="#9A9A9A" stroke-width="3" stroke-linecap="round" aria-hidden="true" style="margin-right: 10px"><path d="M7 34V14M33 34V14M7 15C14 6 26 6 33 15M7 25H33"></path></svg>
+    <span style="font-size: 12px; color: #8A8A8A">Create vault</span>
+    <div style="flex-grow: 1"></div>
+    <button aria-label="Minimize" style="width: 46px; height: 44px; display: flex; align-items: center; justify-content: center"><svg width="10" height="10" viewBox="0 0 10 10" stroke="#8A8A8A" aria-hidden="true"><path d="M0 5H10"></path></svg></button>
+    <button aria-label="Maximize" style="width: 46px; height: 44px; display: flex; align-items: center; justify-content: center"><svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="#8A8A8A" aria-hidden="true"><rect x="0.5" y="0.5" width="9" height="9"></rect></svg></button>
+    <button aria-label="Close" style="width: 46px; height: 44px; display: flex; align-items: center; justify-content: center"><svg width="10" height="10" viewBox="0 0 10 10" stroke="#8A8A8A" aria-hidden="true"><path d="M0 0L10 10M10 0L0 10"></path></svg></button>
+  </div>
+
+  <div style="flex-grow: 1; display: flex; min-height: 0">
+
+    <div style="width: 240px; flex-shrink: 0; box-sizing: border-box; padding: 40px 32px; border-right: 1px solid #222222; display: flex; flex-direction: column; gap: 18px; font-size: 13px">
+      <div style="display: flex; align-items: center; gap: 12px; color: #8A8A8A"><span style="width: 16px; height: 16px; border-radius: 8px; background: #2E2E2E; display: flex; align-items: center; justify-content: center"><svg width="10" height="10" viewBox="0 0 12 12" fill="none" stroke="#B8B8B8" stroke-width="1.5" aria-hidden="true"><path d="M2.5 6.5L5 9L9.5 3.5"></path></svg></span>Name</div>
+      <div style="display: flex; align-items: center; gap: 12px; color: #8A8A8A"><span style="width: 16px; height: 16px; border-radius: 8px; background: #2E2E2E; display: flex; align-items: center; justify-content: center"><svg width="10" height="10" viewBox="0 0 12 12" fill="none" stroke="#B8B8B8" stroke-width="1.5" aria-hidden="true"><path d="M2.5 6.5L5 9L9.5 3.5"></path></svg></span>Profile</div>
+      <div style="display: flex; align-items: center; gap: 12px; color: #8A8A8A"><span style="width: 16px; height: 16px; border-radius: 8px; background: #2E2E2E; display: flex; align-items: center; justify-content: center"><svg width="10" height="10" viewBox="0 0 12 12" fill="none" stroke="#B8B8B8" stroke-width="1.5" aria-hidden="true"><path d="M2.5 6.5L5 9L9.5 3.5"></path></svg></span>Password</div>
+      <div style="display: flex; align-items: center; gap: 12px; color: #E4E4E4"><span style="width: 16px; height: 16px; box-sizing: border-box; border-radius: 8px; border: 1.5px solid #E4E4E4"></span>USB key</div>
+      <div style="display: flex; align-items: center; gap: 12px; color: #7A7A7A"><span style="width: 16px; height: 16px; box-sizing: border-box; border-radius: 8px; border: 1.5px solid #3A3A3A"></span>Recovery code</div>
+      <div style="display: flex; align-items: center; gap: 12px; color: #7A7A7A"><span style="width: 16px; height: 16px; box-sizing: border-box; border-radius: 8px; border: 1.5px solid #3A3A3A"></span>Confirm</div>
+    </div>
+
+    <div style="flex-grow: 1; box-sizing: border-box; padding: 56px 72px 40px; display: flex; flex-direction: column">
+      <div style="width: 520px; display: flex; flex-direction: column">
+        <h1 style="margin: 0 0 10px; font-size: 22px; font-weight: 500">Choose your USB key</h1>
+        <p style="margin: 0 0 28px; font-size: 14px; line-height: 22px; color: #8A8A8A">The vault will only open, and only stay open, while this drive is connected.</p>
+
+        <div style="display: flex; align-items: center; margin-bottom: 10px">
+          <span style="font-size: 12px; color: #8A8A8A">Detected drives</span>
+          <div style="flex-grow: 1"></div>
+          <button style="font-size: 12px; color: #8A8A8A">Refresh</button>
+        </div>
+        <div style="display: flex; flex-direction: column; gap: 8px; margin-bottom: 28px">
+          <label style="height: 52px; display: flex; align-items: center; gap: 14px; padding: 0 18px; border: 1px solid #6A6A6A; background: #1B1B1B; border-radius: 8px; cursor: pointer">
+            <input type="radio" name="drive" checked>
+            <span style="font-size: 14px">KINGSTON</span>
+            <span style="font-size: 13px; color: #8A8A8A; font-family: 'JetBrains Mono', Consolas, monospace">E:</span>
+            <div style="flex-grow: 1"></div>
+            <span style="font-size: 12px; color: #8A8A8A">32 GB</span>
+          </label>
+          <label style="height: 52px; display: flex; align-items: center; gap: 14px; padding: 0 18px; border: 1px solid #2C2C2C; border-radius: 8px; cursor: pointer">
+            <input type="radio" name="drive">
+            <span style="font-size: 14px">SANDISK</span>
+            <span style="font-size: 13px; color: #8A8A8A; font-family: 'JetBrains Mono', Consolas, monospace">F:</span>
+            <div style="flex-grow: 1"></div>
+            <span style="font-size: 12px; color: #8A8A8A">64 GB</span>
+          </label>
+        </div>
+
+        <div style="display: flex; flex-direction: column; gap: 10px; font-size: 13px; line-height: 20px; color: #8A8A8A">
+          <div style="display: flex; gap: 12px"><span style="color: #5E5E5E">—</span><span>A small key file, <span style="font-family: 'JetBrains Mono', Consolas, monospace; color: #D4D4D4">personal.bifrost</span>, is written to the drive. Nothing else on it is touched.</span></div>
+          <div style="display: flex; gap: 12px"><span style="color: #5E5E5E">—</span><span>The key file alone opens nothing. Your password is still required.</span></div>
+          <div style="display: flex; gap: 12px"><span style="color: #5E5E5E">—</span><span>If you lose the drive, your recovery code still opens the vault.</span></div>
+        </div>
+      </div>
+
+      <div style="flex-grow: 1"></div>
+
+      <div style="display: flex; align-items: center; gap: 12px">
+        <button style="height: 40px; padding: 0 18px; border: 1px solid #2C2C2C; border-radius: 6px; font-size: 14px; color: #B8B8B8">Back</button>
+        <div style="flex-grow: 1"></div>
+        <button style="height: 40px; padding: 0 22px; border-radius: 6px; background: #E4E4E4; color: #141414; font-size: 14px; font-weight: 500">Write key to drive</button>
+      </div>
+    </div>
+
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1100,"height":680}}'>
+class Component extends DCLogic {
+renderVals() {
+return {};
+}
+}
+</script>
+</body>
+</html>

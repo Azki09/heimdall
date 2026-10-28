@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Heimdall empty trash</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500&amp;family=JetBrains+Mono:wght@400&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#0E0E0E}
+button{font:inherit;color:inherit;background:none;border:0;padding:0;margin:0;cursor:pointer}
+a{color:#8A8A8A;text-decoration:none}a:hover{color:#E4E4E4}
+</style>
+</helmet>
+<div style="position: relative; width: 1100px; height: 680px; box-sizing: border-box; display: flex; flex-direction: column; background: #141414; color: #E4E4E4; font-family: Inter, 'Segoe UI', sans-serif; border: 1px solid #262626; border-radius: 8px; overflow: hidden">
+
+  <div style="height: 44px; display: flex; align-items: center; padding-left: 14px; flex-shrink: 0">
+    <svg width="16" height="16" viewBox="0 0 40 40" fill="none" stroke="#9A9A9A" stroke-width="3" stroke-linecap="round" aria-hidden="true" style="margin-right: 10px"><path d="M7 34V14M33 34V14M7 15C14 6 26 6 33 15M7 25H33"></path></svg>
+    <span style="font-size: 12px; color: #8A8A8A">Settings · personal.heim</span>
+    <div style="flex-grow: 1"></div>
+    <button aria-label="Minimize" style="width: 46px; height: 44px; display: flex; align-items: center; justify-content: center"><svg width="10" height="10" viewBox="0 0 10 10" stroke="#8A8A8A" aria-hidden="true"><path d="M0 5H10"></path></svg></button>
+    <button aria-label="Maximize" style="width: 46px; height: 44px; display: flex; align-items: center; justify-content: center"><svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="#8A8A8A" aria-hidden="true"><rect x="0.5" y="0.5" width="9" height="9"></rect></svg></button>
+    <button aria-label="Close" style="width: 46px; height: 44px; display: flex; align-items: center; justify-content: center"><svg width="10" height="10" viewBox="0 0 10 10" stroke="#8A8A8A" aria-hidden="true"><path d="M0 0L10 10M10 0L0 10"></path></svg></button>
+  </div>
+
+  <div style="flex-grow: 1; display: flex; min-height: 0">
+
+    <nav style="width: 240px; flex-shrink: 0; box-sizing: border-box; padding: 28px 16px; border-right: 1px solid #222222; display: flex; flex-direction: column; gap: 2px; font-size: 13px">
+      <a href="#" style="display: flex; align-items: center; gap: 10px; height: 34px; padding: 0 12px; margin-bottom: 18px; color: #8A8A8A">
+        <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="#8A8A8A" stroke-width="1.3" aria-hidden="true"><path d="M7.5 2L3.5 6L7.5 10"></path></svg>
+        Back to notes
+      </a>
+      <a href="#" style="height: 34px; display: flex; align-items: center; padding: 0 12px; border-radius: 6px">Security</a>
+      <a href="#" style="height: 34px; display: flex; align-items: center; padding: 0 12px; border-radius: 6px">Access</a>
+      <a href="#" style="height: 34px; display: flex; align-items: center; padding: 0 12px; border-radius: 6px">Editor</a>
+      <a href="#" style="height: 34px; display: flex; align-items: center; padding: 0 12px; border-radius: 6px; background: #1E1E1E; color: #E4E4E4">Trash</a>
+      <a href="#" style="height: 34px; display: flex; align-items: center; padding: 0 12px; border-radius: 6px">About</a>
+    </nav>
+
+    <div style="flex-grow: 1; box-sizing: border-box; padding: 40px 72px; display: flex; flex-direction: column">
+      <div style="width: 640px; display: flex; flex-direction: column">
+        <div style="display: flex; align-items: flex-start; gap: 16px; margin-bottom: 24px">
+          <div style="flex-grow: 1; display: flex; flex-direction: column; gap: 8px">
+            <h1 style="margin: 0; font-size: 22px; font-weight: 500">Trash</h1>
+            <p style="margin: 0; font-size: 14px; line-height: 22px; color: #8A8A8A">Closed tabs stay here, encrypted, for 30 days.</p>
+          </div>
+          <button style="height: 34px; padding: 0 14px; border: 1px solid #2C2C2C; border-radius: 6px; font-size: 13px; color: #C98A84">Empty trash</button>
+        </div>
+
+        <div style="display: flex; flex-direction: column; border: 1px solid #2C2C2C; border-radius: 8px">
+          <div style="display: flex; align-items: center; gap: 16px; padding: 16px 18px; border-bottom: 1px solid #222222">
+            <div style="flex-grow: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px">
+              <span style="font-size: 14px">Old router</span>
+              <span style="font-size: 12px; color: #8A8A8A; font-family: 'JetBrains Mono', Consolas, monospace; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">admin: 192.168.0.1 · password ••••••••</span>
+            </div>
+            <span style="font-size: 12px; color: #8A8A8A; white-space: nowrap">Deletes in 27 days</span>
+            <button style="height: 32px; padding: 0 12px; border: 1px solid #2C2C2C; border-radius: 6px; font-size: 13px; color: #B8B8B8">Restore</button>
+          </div>
+          <div style="display: flex; align-items: center; gap: 16px; padding: 16px 18px; border-bottom: 1px solid #222222">
+            <div style="flex-grow: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px">
+              <span style="font-size: 14px">Gift ideas</span>
+              <span style="font-size: 12px; color: #8A8A8A; font-family: 'JetBrains Mono', Consolas, monospace; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">Mom: the blue scarf from the market</span>
+            </div>
+            <span style="font-size: 12px; color: #8A8A8A; white-space: nowrap">Deletes in 12 days</span>
+            <button style="height: 32px; padding: 0 12px; border: 1px solid #2C2C2C; border-radius: 6px; font-size: 13px; color: #B8B8B8">Restore</button>
+          </div>
+          <div style="display: flex; align-items: center; gap: 16px; padding: 16px 18px">
+            <div style="flex-grow: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px">
+              <span style="font-size: 14px">Untitled</span>
+              <span style="font-size: 12px; color: #8A8A8A; font-family: 'JetBrains Mono', Consolas, monospace; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">call the bank about the card</span>
+            </div>
+            <span style="font-size: 12px; color: #8A8A8A; white-space: nowrap">Deletes in 3 days</span>
+            <button style="height: 32px; padding: 0 12px; border: 1px solid #2C2C2C; border-radius: 6px; font-size: 13px; color: #B8B8B8">Restore</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <div style="position: absolute; inset: 0; background: rgba(8, 8, 8, 0.72); display: flex; align-items: center; justify-content: center">
+    <div role="dialog" aria-modal="true" aria-labelledby="dlg-title" style="width: 420px; box-sizing: border-box; padding: 28px; background: #1B1B1B; border: 1px solid #2C2C2C; border-radius: 10px; display: flex; flex-direction: column">
+      <h2 id="dlg-title" style="margin: 0 0 10px; font-size: 17px; font-weight: 500">Empty trash?</h2>
+      <p style="margin: 0 0 16px; font-size: 13px; line-height: 20px; color: #9A9A9A">3 notes will be deleted permanently. This can't be undone.</p>
+      <p style="margin: 0 0 24px; padding: 12px 14px; border: 1px solid #262626; border-radius: 6px; background: #171717; font-size: 12px; line-height: 18px; color: #8A8A8A">Copies of this file made before now, such as backups, still contain them.</p>
+      <div style="display: flex; justify-content: flex-end; gap: 10px">
+        <button style="height: 38px; padding: 0 16px; border: 1px solid #2C2C2C; border-radius: 6px; font-size: 13px; color: #B8B8B8">Cancel</button>
+        <button style="height: 38px; padding: 0 16px; border-radius: 6px; background: #C98A84; color: #141414; font-size: 13px; font-weight: 500">Delete permanently</button>
+      </div>
+    </div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1100,"height":680}}'>
+class Component extends DCLogic {
+renderVals() {
+return {};
+}
+}
+</script>
+</body>
+</html>

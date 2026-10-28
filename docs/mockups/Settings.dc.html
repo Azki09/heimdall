@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Heimdall settings</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500&amp;family=JetBrains+Mono:wght@400&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#0E0E0E}
+button{font:inherit;color:inherit;background:none;border:0;padding:0;margin:0;cursor:pointer}
+select{font:inherit;outline:none;appearance:none;-webkit-appearance:none;cursor:pointer}
+a{color:#8A8A8A;text-decoration:none}a:hover{color:#E4E4E4}
+</style>
+</helmet>
+<div style="width: 1100px; height: 680px; box-sizing: border-box; display: flex; flex-direction: column; background: #141414; color: #E4E4E4; font-family: Inter, 'Segoe UI', sans-serif; border: 1px solid #262626; border-radius: 8px; overflow: hidden">
+
+  <div style="height: 44px; display: flex; align-items: center; padding-left: 14px; flex-shrink: 0">
+    <svg width="16" height="16" viewBox="0 0 40 40" fill="none" stroke="#9A9A9A" stroke-width="3" stroke-linecap="round" aria-hidden="true" style="margin-right: 10px"><path d="M7 34V14M33 34V14M7 15C14 6 26 6 33 15M7 25H33"></path></svg>
+    <span style="font-size: 12px; color: #8A8A8A">Settings · personal.heim</span>
+    <div style="flex-grow: 1"></div>
+    <button aria-label="Minimize" style="width: 46px; height: 44px; display: flex; align-items: center; justify-content: center"><svg width="10" height="10" viewBox="0 0 10 10" stroke="#8A8A8A" aria-hidden="true"><path d="M0 5H10"></path></svg></button>
+    <button aria-label="Maximize" style="width: 46px; height: 44px; display: flex; align-items: center; justify-content: center"><svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="#8A8A8A" aria-hidden="true"><rect x="0.5" y="0.5" width="9" height="9"></rect></svg></button>
+    <button aria-label="Close" style="width: 46px; height: 44px; display: flex; align-items: center; justify-content: center"><svg width="10" height="10" viewBox="0 0 10 10" stroke="#8A8A8A" aria-hidden="true"><path d="M0 0L10 10M10 0L0 10"></path></svg></button>
+  </div>
+
+  <div style="flex-grow: 1; display: flex; min-height: 0">
+
+    <nav style="width: 240px; flex-shrink: 0; box-sizing: border-box; padding: 28px 16px; border-right: 1px solid #222222; display: flex; flex-direction: column; gap: 2px; font-size: 13px">
+      <a href="#" style="display: flex; align-items: center; gap: 10px; height: 34px; padding: 0 12px; margin-bottom: 18px; color: #8A8A8A">
+        <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="#8A8A8A" stroke-width="1.3" aria-hidden="true"><path d="M7.5 2L3.5 6L7.5 10"></path></svg>
+        Back to notes
+      </a>
+      <a href="#" style="height: 34px; display: flex; align-items: center; padding: 0 12px; border-radius: 6px; background: #1E1E1E; color: #E4E4E4">Security</a>
+      <a href="#" style="height: 34px; display: flex; align-items: center; padding: 0 12px; border-radius: 6px">Access</a>
+      <a href="#" style="height: 34px; display: flex; align-items: center; padding: 0 12px; border-radius: 6px">Editor</a>
+      <a href="#" style="height: 34px; display: flex; align-items: center; padding: 0 12px; border-radius: 6px">Trash</a>
+      <a href="#" style="height: 34px; display: flex; align-items: center; padding: 0 12px; border-radius: 6px">About</a>
+    </nav>
+
+    <div style="flex-grow: 1; box-sizing: border-box; padding: 40px 72px; display: flex; flex-direction: column">
+      <div style="width: 600px; display: flex; flex-direction: column">
+        <h1 style="margin: 0 0 28px; font-size: 22px; font-weight: 500">Security</h1>
+
+        <div style="display: flex; align-items: center; gap: 16px; padding: 16px 18px; border: 1px solid #2C2C2C; border-radius: 8px; margin-bottom: 28px">
+          <div style="display: flex; flex-direction: column; gap: 4px; flex-grow: 1">
+            <span style="font-size: 12px; color: #8A8A8A">Profile</span>
+            <span style="font-size: 15px">Hardened <span style="color: #8A8A8A">· Custom</span></span>
+          </div>
+          <button style="height: 34px; padding: 0 14px; font-size: 13px; color: #8A8A8A">Reset to profile defaults</button>
+          <button style="height: 34px; padding: 0 14px; border: 1px solid #2C2C2C; border-radius: 6px; font-size: 13px; color: #B8B8B8">Change profile</button>
+        </div>
+
+        <div style="display: flex; flex-direction: column">
+
+          <div style="display: flex; align-items: center; gap: 24px; padding: 16px 0; border-bottom: 1px solid #222222">
+            <div style="flex-grow: 1; display: flex; flex-direction: column; gap: 4px">
+              <label for="lockafter" style="font-size: 14px">Lock after inactivity</label>
+              <span style="font-size: 12px; color: #8A8A8A">Longer than the Hardened default (5 min).</span>
+            </div>
+            <div style="position: relative; width: 140px">
+              <select id="lockafter" style="width: 140px; height: 36px; padding: 0 32px 0 12px; background: #1B1B1B; border: 1px solid #2C2C2C; border-radius: 6px; color: #E4E4E4; font-size: 13px">
+                <option>1 min</option><option>2 min</option><option>5 min</option><option>10 min</option><option selected>15 min</option><option>30 min</option><option>1 hour</option>
+              </select>
+              <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="#8A8A8A" stroke-width="1.3" aria-hidden="true" style="position: absolute; right: 12px; top: 13px; pointer-events: none"><path d="M2 3.5L5 6.5L8 3.5"></path></svg>
+            </div>
+          </div>
+
+          <div style="display: flex; align-items: center; gap: 24px; padding: 16px 0; border-bottom: 1px solid #222222">
+            <div style="flex-grow: 1; display: flex; flex-direction: column; gap: 4px">
+              <label for="clip" style="font-size: 14px">Clear clipboard after</label>
+              <span style="font-size: 12px; color: #8A8A8A">Only if it still holds what Heimdall copied.</span>
+            </div>
+            <div style="position: relative; width: 140px">
+              <select id="clip" style="width: 140px; height: 36px; padding: 0 32px 0 12px; background: #1B1B1B; border: 1px solid #2C2C2C; border-radius: 6px; color: #E4E4E4; font-size: 13px">
+                <option>10 s</option><option selected>20 s</option><option>30 s</option><option>60 s</option>
+              </select>
+              <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="#8A8A8A" stroke-width="1.3" aria-hidden="true" style="position: absolute; right: 12px; top: 13px; pointer-events: none"><path d="M2 3.5L5 6.5L8 3.5"></path></svg>
+            </div>
+          </div>
+
+          <div style="display: flex; align-items: center; gap: 24px; padding: 16px 0; border-bottom: 1px solid #222222">
+            <div style="flex-grow: 1; display: flex; flex-direction: column; gap: 4px">
+              <span style="font-size: 14px">Lock when minimized</span>
+            </div>
+            <button aria-pressed="false" aria-label="Lock when minimized" style="width: 36px; height: 20px; border-radius: 10px; background: #2A2A2A; display: flex; align-items: center; padding: 0 3px; box-sizing: border-box">
+              <span style="width: 14px; height: 14px; border-radius: 7px; background: #8A8A8A"></span>
+            </button>
+          </div>
+
+          <div style="display: flex; align-items: center; gap: 24px; padding: 16px 0; border-bottom: 1px solid #222222">
+            <div style="flex-grow: 1; display: flex; flex-direction: column; gap: 4px">
+              <span style="font-size: 14px">Hide window from screenshots</span>
+              <span style="font-size: 12px; color: #8A8A8A">Screen recorders and sharing apps see a blank window.</span>
+            </div>
+            <button aria-pressed="true" aria-label="Hide window from screenshots" style="width: 36px; height: 20px; border-radius: 10px; background: #D4D4D4; display: flex; align-items: center; justify-content: flex-end; padding: 0 3px; box-sizing: border-box">
+              <span style="width: 14px; height: 14px; border-radius: 7px; background: #141414"></span>
+            </button>
+          </div>
+
+          <div style="display: flex; align-items: center; gap: 24px; padding: 16px 0; border-bottom: 1px solid #222222">
+            <div style="flex-grow: 1; display: flex; flex-direction: column; gap: 4px">
+              <span style="font-size: 14px">Remember recent vaults</span>
+              <span style="font-size: 12px; color: #8A8A8A">Off: this vault's path is never saved and is removed from the Welcome list.</span>
+            </div>
+            <button aria-pressed="false" aria-label="Remember recent vaults" style="width: 36px; height: 20px; border-radius: 10px; background: #2A2A2A; display: flex; align-items: center; padding: 0 3px; box-sizing: border-box">
+              <span style="width: 14px; height: 14px; border-radius: 7px; background: #8A8A8A"></span>
+            </button>
+          </div>
+
+          <div style="display: flex; align-items: center; gap: 24px; padding: 16px 0">
+            <div style="flex-grow: 1; display: flex; flex-direction: column; gap: 4px">
+              <span style="font-size: 14px; color: #8A8A8A">Lock when Windows locks or sleeps</span>
+            </div>
+            <span style="font-size: 12px; color: #8A8A8A">Always on</span>
+          </div>
+
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1100,"height":680}}'>
+class Component extends DCLogic {
+renderVals() {
+return {};
+}
+}
+</script>
+</body>
+</html>

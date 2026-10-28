@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Create vault: recovery code</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500&amp;family=JetBrains+Mono:wght@400&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#0E0E0E}
+button{font:inherit;color:inherit;background:none;border:0;padding:0;margin:0;cursor:pointer}
+a{color:#8A8A8A;text-decoration:none}a:hover{color:#E4E4E4}
+</style>
+</helmet>
+<div style="width: 1100px; height: 680px; box-sizing: border-box; display: flex; flex-direction: column; background: #141414; color: #E4E4E4; font-family: Inter, 'Segoe UI', sans-serif; border: 1px solid #262626; border-radius: 8px; overflow: hidden">
+
+  <div style="height: 44px; display: flex; align-items: center; padding-left: 14px; flex-shrink: 0">
+    <svg width="16" height="16" viewBox="0 0 40 40" fill="none" stroke="#9A9A9A" stroke-width="3" stroke-linecap="round" aria-hidden="true" style="margin-right: 10px"><path d="M7 34V14M33 34V14M7 15C14 6 26 6 33 15M7 25H33"></path></svg>
+    <span style="font-size: 12px; color: #8A8A8A">Create vault</span>
+    <div style="flex-grow: 1"></div>
+    <button aria-label="Minimize" style="width: 46px; height: 44px; display: flex; align-items: center; justify-content: center"><svg width="10" height="10" viewBox="0 0 10 10" stroke="#8A8A8A" aria-hidden="true"><path d="M0 5H10"></path></svg></button>
+    <button aria-label="Maximize" style="width: 46px; height: 44px; display: flex; align-items: center; justify-content: center"><svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="#8A8A8A" aria-hidden="true"><rect x="0.5" y="0.5" width="9" height="9"></rect></svg></button>
+    <button aria-label="Close" style="width: 46px; height: 44px; display: flex; align-items: center; justify-content: center"><svg width="10" height="10" viewBox="0 0 10 10" stroke="#8A8A8A" aria-hidden="true"><path d="M0 0L10 10M10 0L0 10"></path></svg></button>
+  </div>
+
+  <div style="flex-grow: 1; display: flex; min-height: 0">
+
+    <div style="width: 240px; flex-shrink: 0; box-sizing: border-box; padding: 40px 32px; border-right: 1px solid #222222; display: flex; flex-direction: column; gap: 18px; font-size: 13px">
+      <div style="display: flex; align-items: center; gap: 12px; color: #8A8A8A"><span style="width: 16px; height: 16px; border-radius: 8px; background: #2E2E2E; display: flex; align-items: center; justify-content: center"><svg width="10" height="10" viewBox="0 0 12 12" fill="none" stroke="#B8B8B8" stroke-width="1.5" aria-hidden="true"><path d="M2.5 6.5L5 9L9.5 3.5"></path></svg></span>Name</div>
+      <div style="display: flex; align-items: center; gap: 12px; color: #8A8A8A"><span style="width: 16px; height: 16px; border-radius: 8px; background: #2E2E2E; display: flex; align-items: center; justify-content: center"><svg width="10" height="10" viewBox="0 0 12 12" fill="none" stroke="#B8B8B8" stroke-width="1.5" aria-hidden="true"><path d="M2.5 6.5L5 9L9.5 3.5"></path></svg></span>Profile</div>
+      <div style="display: flex; align-items: center; gap: 12px; color: #8A8A8A"><span style="width: 16px; height: 16px; border-radius: 8px; background: #2E2E2E; display: flex; align-items: center; justify-content: center"><svg width="10" height="10" viewBox="0 0 12 12" fill="none" stroke="#B8B8B8" stroke-width="1.5" aria-hidden="true"><path d="M2.5 6.5L5 9L9.5 3.5"></path></svg></span>Password</div>
+      <div style="display: flex; align-items: center; gap: 12px; color: #8A8A8A"><span style="width: 16px; height: 16px; border-radius: 8px; background: #2E2E2E; display: flex; align-items: center; justify-content: center"><svg width="10" height="10" viewBox="0 0 12 12" fill="none" stroke="#B8B8B8" stroke-width="1.5" aria-hidden="true"><path d="M2.5 6.5L5 9L9.5 3.5"></path></svg></span>USB key</div>
+      <div style="display: flex; align-items: center; gap: 12px; color: #E4E4E4"><span style="width: 16px; height: 16px; box-sizing: border-box; border-radius: 8px; border: 1.5px solid #E4E4E4"></span>Recovery code</div>
+      <div style="display: flex; align-items: center; gap: 12px; color: #7A7A7A"><span style="width: 16px; height: 16px; box-sizing: border-box; border-radius: 8px; border: 1.5px solid #3A3A3A"></span>Confirm</div>
+    </div>
+
+    <div style="flex-grow: 1; box-sizing: border-box; padding: 56px 72px 40px; display: flex; flex-direction: column">
+      <div style="width: 560px; display: flex; flex-direction: column">
+        <h1 style="margin: 0 0 10px; font-size: 22px; font-weight: 500">Write down your recovery code</h1>
+        <p style="margin: 0 0 28px; font-size: 14px; line-height: 22px; color: #8A8A8A">If you forget your password or lose your USB key, these 12 words are the only way back in.</p>
+
+        <ol style="margin: 0 0 24px; padding: 20px 24px; list-style: none; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); row-gap: 14px; column-gap: 16px; border: 1px solid #2C2C2C; border-radius: 8px; background: #1B1B1B; font-family: 'JetBrains Mono', Consolas, monospace; font-size: 15px">
+          <li style="display: flex; gap: 12px"><span style="width: 20px; text-align: right; color: #7A7A7A">1</span>harbor</li>
+          <li style="display: flex; gap: 12px"><span style="width: 20px; text-align: right; color: #7A7A7A">2</span>glimpse</li>
+          <li style="display: flex; gap: 12px"><span style="width: 20px; text-align: right; color: #7A7A7A">3</span>oxygen</li>
+          <li style="display: flex; gap: 12px"><span style="width: 20px; text-align: right; color: #7A7A7A">4</span>tackle</li>
+          <li style="display: flex; gap: 12px"><span style="width: 20px; text-align: right; color: #7A7A7A">5</span>sunset</li>
+          <li style="display: flex; gap: 12px"><span style="width: 20px; text-align: right; color: #7A7A7A">6</span>lizard</li>
+          <li style="display: flex; gap: 12px"><span style="width: 20px; text-align: right; color: #7A7A7A">7</span>marble</li>
+          <li style="display: flex; gap: 12px"><span style="width: 20px; text-align: right; color: #7A7A7A">8</span>ribbon</li>
+          <li style="display: flex; gap: 12px"><span style="width: 20px; text-align: right; color: #7A7A7A">9</span>quantum</li>
+          <li style="display: flex; gap: 12px"><span style="width: 20px; text-align: right; color: #7A7A7A">10</span>desert</li>
+          <li style="display: flex; gap: 12px"><span style="width: 20px; text-align: right; color: #7A7A7A">11</span>fossil</li>
+          <li style="display: flex; gap: 12px"><span style="width: 20px; text-align: right; color: #7A7A7A">12</span>anchor</li>
+        </ol>
+
+        <div style="display: flex; flex-direction: column; gap: 10px; font-size: 13px; line-height: 20px; color: #8A8A8A">
+          <div style="display: flex; gap: 12px"><span style="color: #5E5E5E">—</span><span>This code opens the vault <span style="color: #D4D4D4">without your password or USB key</span>. Keep it like a passport.</span></div>
+          <div style="display: flex; gap: 12px"><span style="color: #5E5E5E">—</span><span>It is shown only once. It is never saved to disk or copied to the clipboard.</span></div>
+        </div>
+      </div>
+
+      <div style="flex-grow: 1"></div>
+
+      <div style="display: flex; align-items: center; gap: 12px">
+        <button style="height: 40px; padding: 0 18px; border: 1px solid #2C2C2C; border-radius: 6px; font-size: 14px; color: #B8B8B8">Back</button>
+        <div style="flex-grow: 1"></div>
+        <button style="height: 40px; display: flex; align-items: center; gap: 8px; padding: 0 18px; border: 1px solid #2C2C2C; border-radius: 6px; font-size: 14px; color: #B8B8B8">
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="#B8B8B8" stroke-width="1.2" aria-hidden="true"><path d="M4 6V2h8v4M4 12H2.5A1 1 0 0 1 1.5 11V7a1 1 0 0 1 1-1h11a1 1 0 0 1 1 1v4a1 1 0 0 1-1 1H12"></path><rect x="4" y="9.5" width="8" height="5"></rect></svg>
+          <span>Print recovery sheet</span>
+        </button>
+        <button style="height: 40px; padding: 0 22px; border-radius: 6px; background: #E4E4E4; color: #141414; font-size: 14px; font-weight: 500">I've written it down</button>
+      </div>
+    </div>
+
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1100,"height":680}}'>
+class Component extends DCLogic {
+renderVals() {
+return {};
+}
+}
+</script>
+</body>
+</html>

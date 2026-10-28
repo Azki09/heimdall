@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Create vault: name</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500&amp;family=JetBrains+Mono:wght@400&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#0E0E0E}
+button{font:inherit;color:inherit;background:none;border:0;padding:0;margin:0;cursor:pointer}
+input{font:inherit;outline:none}
+a{color:#8A8A8A;text-decoration:none}a:hover{color:#E4E4E4}
+</style>
+</helmet>
+<div style="width: 1100px; height: 680px; box-sizing: border-box; display: flex; flex-direction: column; background: #141414; color: #E4E4E4; font-family: Inter, 'Segoe UI', sans-serif; border: 1px solid #262626; border-radius: 8px; overflow: hidden">
+
+  <div style="height: 44px; display: flex; align-items: center; padding-left: 14px; flex-shrink: 0">
+    <svg width="16" height="16" viewBox="0 0 40 40" fill="none" stroke="#9A9A9A" stroke-width="3" stroke-linecap="round" aria-hidden="true" style="margin-right: 10px"><path d="M7 34V14M33 34V14M7 15C14 6 26 6 33 15M7 25H33"></path></svg>
+    <span style="font-size: 12px; color: #8A8A8A">Create vault</span>
+    <div style="flex-grow: 1"></div>
+    <button aria-label="Minimize" style="width: 46px; height: 44px; display: flex; align-items: center; justify-content: center"><svg width="10" height="10" viewBox="0 0 10 10" stroke="#8A8A8A" aria-hidden="true"><path d="M0 5H10"></path></svg></button>
+    <button aria-label="Maximize" style="width: 46px; height: 44px; display: flex; align-items: center; justify-content: center"><svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="#8A8A8A" aria-hidden="true"><rect x="0.5" y="0.5" width="9" height="9"></rect></svg></button>
+    <button aria-label="Close" style="width: 46px; height: 44px; display: flex; align-items: center; justify-content: center"><svg width="10" height="10" viewBox="0 0 10 10" stroke="#8A8A8A" aria-hidden="true"><path d="M0 0L10 10M10 0L0 10"></path></svg></button>
+  </div>
+
+  <div style="flex-grow: 1; display: flex; min-height: 0">
+
+    <div style="width: 240px; flex-shrink: 0; box-sizing: border-box; padding: 40px 32px; border-right: 1px solid #222222; display: flex; flex-direction: column; gap: 18px; font-size: 13px">
+      <div style="display: flex; align-items: center; gap: 12px; color: #E4E4E4"><span style="width: 16px; height: 16px; box-sizing: border-box; border-radius: 8px; border: 1.5px solid #E4E4E4"></span>Name</div>
+      <div style="display: flex; align-items: center; gap: 12px; color: #7A7A7A"><span style="width: 16px; height: 16px; box-sizing: border-box; border-radius: 8px; border: 1.5px solid #3A3A3A"></span>Profile</div>
+      <div style="display: flex; align-items: center; gap: 12px; color: #7A7A7A"><span style="width: 16px; height: 16px; box-sizing: border-box; border-radius: 8px; border: 1.5px solid #3A3A3A"></span>Password</div>
+      <div style="display: flex; align-items: center; gap: 12px; color: #7A7A7A"><span style="width: 16px; height: 16px; box-sizing: border-box; border-radius: 8px; border: 1.5px solid #3A3A3A"></span>USB key</div>
+      <div style="display: flex; align-items: center; gap: 12px; color: #7A7A7A"><span style="width: 16px; height: 16px; box-sizing: border-box; border-radius: 8px; border: 1.5px solid #3A3A3A"></span>Recovery code</div>
+      <div style="display: flex; align-items: center; gap: 12px; color: #7A7A7A"><span style="width: 16px; height: 16px; box-sizing: border-box; border-radius: 8px; border: 1.5px solid #3A3A3A"></span>Confirm</div>
+    </div>
+
+    <div style="flex-grow: 1; box-sizing: border-box; padding: 56px 72px 40px; display: flex; flex-direction: column">
+      <div style="width: 460px; display: flex; flex-direction: column">
+        <h1 style="margin: 0 0 10px; font-size: 22px; font-weight: 500">Name your vault</h1>
+        <p style="margin: 0 0 36px; font-size: 14px; line-height: 22px; color: #8A8A8A">A vault is a single encrypted file. You can keep it anywhere: your documents, a cloud folder, a USB drive.</p>
+
+        <label for="vname" style="font-size: 12px; color: #8A8A8A; margin-bottom: 8px">Vault name</label>
+        <div style="height: 42px; display: flex; align-items: center; background: #1B1B1B; border: 1px solid #4A4A4A; border-radius: 6px; padding: 0 12px; margin-bottom: 24px">
+          <input id="vname" type="text" value="personal" style="flex-grow: 1; min-width: 0; background: transparent; border: 0; color: #E4E4E4; font-size: 14px">
+        </div>
+
+        <div style="font-size: 12px; color: #8A8A8A; margin-bottom: 8px">Location</div>
+        <div style="display: flex; gap: 8px">
+          <div style="flex-grow: 1; height: 42px; display: flex; align-items: center; border: 1px solid #2C2C2C; border-radius: 6px; padding: 0 12px; font-family: 'JetBrains Mono', Consolas, monospace; font-size: 13px; color: #D4D4D4; overflow: hidden; white-space: nowrap">Documents\personal.heim</div>
+          <button style="height: 42px; padding: 0 16px; border: 1px solid #2C2C2C; border-radius: 6px; font-size: 13px; color: #B8B8B8">Change</button>
+        </div>
+      </div>
+
+      <div style="flex-grow: 1"></div>
+
+      <div style="display: flex; align-items: center; gap: 12px">
+        <button style="height: 40px; padding: 0 18px; border: 1px solid #2C2C2C; border-radius: 6px; font-size: 14px; color: #B8B8B8">Cancel</button>
+        <div style="flex-grow: 1"></div>
+        <button style="height: 40px; padding: 0 22px; border-radius: 6px; background: #E4E4E4; color: #141414; font-size: 14px; font-weight: 500">Continue</button>
+      </div>
+    </div>
+
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1100,"height":680}}'>
+class Component extends DCLogic {
+renderVals() {
+return {};
+}
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Heimdall unlock</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500&amp;family=JetBrains+Mono:wght@400&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#0E0E0E}
+button{font:inherit;color:inherit;background:none;border:0;padding:0;margin:0;cursor:pointer}
+input{font:inherit;outline:none}
+a{color:#8A8A8A;text-decoration:none}a:hover{color:#E4E4E4}
+</style>
+</helmet>
+<div style="width: 1100px; height: 680px; box-sizing: border-box; display: flex; flex-direction: column; background: #141414; color: #E4E4E4; font-family: Inter, 'Segoe UI', sans-serif; border: 1px solid #262626; border-radius: 8px; overflow: hidden">
+
+  <div style="height: 44px; display: flex; align-items: center; padding-left: 14px; flex-shrink: 0">
+    <svg width="16" height="16" viewBox="0 0 40 40" fill="none" stroke="#9A9A9A" stroke-width="3" stroke-linecap="round" aria-hidden="true" style="margin-right: 10px"><path d="M7 34V14M33 34V14M7 15C14 6 26 6 33 15M7 25H33"></path></svg>
+    <span style="font-size: 12px; color: #8A8A8A">Heimdall</span>
+    <div style="flex-grow: 1"></div>
+    <button aria-label="Minimize" style="width: 46px; height: 44px; display: flex; align-items: center; justify-content: center">
+      <svg width="10" height="10" viewBox="0 0 10 10" stroke="#8A8A8A" aria-hidden="true"><path d="M0 5H10"></path></svg>
+    </button>
+    <button aria-label="Maximize" style="width: 46px; height: 44px; display: flex; align-items: center; justify-content: center">
+      <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="#8A8A8A" aria-hidden="true"><rect x="0.5" y="0.5" width="9" height="9"></rect></svg>
+    </button>
+    <button aria-label="Close" style="width: 46px; height: 44px; display: flex; align-items: center; justify-content: center">
+      <svg width="10" height="10" viewBox="0 0 10 10" stroke="#8A8A8A" aria-hidden="true"><path d="M0 0L10 10M10 0L0 10"></path></svg>
+    </button>
+  </div>
+
+  <div style="flex-grow: 1; display: flex; align-items: center; justify-content: center">
+    <div style="width: 340px; display: flex; flex-direction: column; align-items: stretch">
+
+      <div style="display: flex; flex-direction: column; align-items: center; gap: 14px; margin-bottom: 36px">
+        <pre aria-hidden="true" style="margin: 0 0 6px 0; font-family: 'JetBrains Mono', Consolas, monospace; font-size: 8px; line-height: 8.5px; color: #6E6E6E; white-space: pre">     #####    ##                                    ##           ###   ###
+  ######  /  #### /        #                         ##           ###   ###
+ /#   /  /   ####/        ###                        ##            ##    ##
+/    /  /    # #           #                         ##            ##    ##
+    /  /     #                                       ##            ##    ##
+   ## ##     #      /##  ###   ### /### /###     ### ##    /###    ##    ##
+   ## ##     #     / ###  ###   ##/ ###/ /##  / ######### / ###  / ##    ##
+   ## ########    /   ###  ##    ##  ###/ ###/ ##   #### /   ###/  ##    ##
+   ## ##     #   ##    ### ##    ##   ##   ##  ##    ## ##    ##   ##    ##
+   ## ##     ##  ########  ##    ##   ##   ##  ##    ## ##    ##   ##    ##
+   #  ##     ##  #######   ##    ##   ##   ##  ##    ## ##    ##   ##    ##
+      /       ## ##        ##    ##   ##   ##  ##    ## ##    ##   ##    ##
+  /##/        ## ####    / ##    ##   ##   ##  ##    /# ##    /#   ##    ##
+ /  #####      ## ######/  ### / ###  ###  ###  ####/    ####/ ##  ### / ### /
+/     ##           #####    ##/   ###  ###  ###  ###      ###   ##  ##/   ##/
+#
+ ##</pre>
+        <div style="font-size: 13px; color: #8A8A8A; font-family: 'JetBrains Mono', Consolas, monospace">personal.heim</div>
+      </div>
+
+      <label for="pw" style="font-size: 12px; color: #8A8A8A; margin-bottom: 8px">Password</label>
+      <div style="height: 42px; display: flex; align-items: center; background: #1B1B1B; border: 1px solid #4A4A4A; border-radius: 6px; padding: 0 6px 0 12px; margin-bottom: 20px">
+        <input id="pw" type="password" value="correcthorse" style="flex-grow: 1; min-width: 0; background: transparent; border: 0; color: #E4E4E4; font-size: 14px; letter-spacing: 2px">
+        <button aria-label="Show password" style="width: 30px; height: 30px; display: flex; align-items: center; justify-content: center">
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="#7A7A7A" stroke-width="1.2" aria-hidden="true"><path d="M1 8s2.5-5 7-5 7 5 7 5-2.5 5-7 5-7-5-7-5z"></path><circle cx="8" cy="8" r="2"></circle></svg>
+        </button>
+      </div>
+
+      <div style="font-size: 12px; color: #8A8A8A; margin-bottom: 8px">Key</div>
+      <div style="height: 42px; display: flex; align-items: center; gap: 10px; border: 1px solid #2C2C2C; border-radius: 6px; padding: 0 12px; margin-bottom: 28px; font-size: 13px">
+        <span style="width: 6px; height: 6px; border-radius: 3px; background: #6E9C7A"></span>
+        <span style="color: #D4D4D4">USB key detected</span>
+        <div style="flex-grow: 1"></div>
+        <span style="color: #8A8A8A">KINGSTON (E:)</span>
+      </div>
+
+      <button style="height: 42px; border-radius: 6px; background: #E4E4E4; color: #141414; font-size: 14px; font-weight: 500">Unlock</button>
+
+      <div style="display: flex; justify-content: center; gap: 24px; margin-top: 24px; font-size: 13px">
+        <a href="#">Use recovery code</a>
+        <a href="#">Open another vault</a>
+      </div>
+
+    </div>
+  </div>
+
+  <div style="height: 30px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; font-size: 12px; color: #6E6E6E">
+    <span>No signal. No trace.</span>
+  </div>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1100,"height":680}}'>
+class Component extends DCLogic {
+renderVals() {
+return {};
+}
+}
+</script>
+</body>
+</html>

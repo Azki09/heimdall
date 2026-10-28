@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Heimdall editor</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500&amp;family=JetBrains+Mono:wght@400&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#0E0E0E}
+button{font:inherit;color:inherit;background:none;border:0;padding:0;margin:0;cursor:pointer}
+a{color:#8A8A8A}a:hover{color:#E4E4E4}
+</style>
+</helmet>
+<div style="width: 1100px; height: 680px; box-sizing: border-box; display: flex; flex-direction: column; background: #141414; color: #E4E4E4; font-family: Inter, 'Segoe UI', sans-serif; border: 1px solid #262626; border-radius: 8px; overflow: hidden">
+
+  <div style="height: 44px; display: flex; align-items: center; gap: 4px; padding-left: 14px; flex-shrink: 0">
+    <svg width="16" height="16" viewBox="0 0 40 40" fill="none" stroke="#9A9A9A" stroke-width="3" stroke-linecap="round" aria-hidden="true" style="margin-right: 10px; flex-shrink: 0"><path d="M7 34V14M33 34V14M7 15C14 6 26 6 33 15M7 25H33"></path></svg>
+
+    <button style="height: 32px; display: flex; align-items: center; gap: 10px; padding: 0 10px 0 14px; border-radius: 6px 6px 0 0; background: #1B1B1B; color: #E4E4E4; font-size: 13px; align-self: flex-end">
+      <span>Passwords</span>
+      <span style="width: 6px; height: 6px; border-radius: 3px; background: #9A9A9A" aria-label="Unsaved changes"></span>
+      <svg width="10" height="10" viewBox="0 0 10 10" stroke="#8A8A8A" stroke-width="1.2" aria-hidden="true"><path d="M1 1L9 9M9 1L1 9"></path></svg>
+    </button>
+    <button style="height: 32px; display: flex; align-items: center; padding: 0 14px; color: #8A8A8A; font-size: 13px; align-self: flex-end">Work notes</button>
+    <button style="height: 32px; display: flex; align-items: center; padding: 0 14px; color: #8A8A8A; font-size: 13px; align-self: flex-end">Home</button>
+    <button aria-label="New tab" style="width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; border-radius: 6px">
+      <svg width="12" height="12" viewBox="0 0 12 12" stroke="#8A8A8A" stroke-width="1.3" aria-hidden="true"><path d="M6 1V11M1 6H11"></path></svg>
+    </button>
+
+    <div style="flex-grow: 1"></div>
+
+    <button style="height: 28px; display: flex; align-items: center; gap: 8px; padding: 0 12px; border: 1px solid #2C2C2C; border-radius: 6px; font-size: 12px; color: #B8B8B8; margin-right: 8px">
+      <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="#B8B8B8" stroke-width="1.2" aria-hidden="true"><rect x="2" y="5.5" width="8" height="5.5" rx="1"></rect><path d="M4 5.5V4a2 2 0 0 1 4 0v1.5"></path></svg>
+      <span>Lock</span>
+    </button>
+
+    <button aria-label="Minimize" style="width: 46px; height: 44px; display: flex; align-items: center; justify-content: center">
+      <svg width="10" height="10" viewBox="0 0 10 10" stroke="#8A8A8A" aria-hidden="true"><path d="M0 5H10"></path></svg>
+    </button>
+    <button aria-label="Maximize" style="width: 46px; height: 44px; display: flex; align-items: center; justify-content: center">
+      <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="#8A8A8A" aria-hidden="true"><rect x="0.5" y="0.5" width="9" height="9"></rect></svg>
+    </button>
+    <button aria-label="Close" style="width: 46px; height: 44px; display: flex; align-items: center; justify-content: center">
+      <svg width="10" height="10" viewBox="0 0 10 10" stroke="#8A8A8A" aria-hidden="true"><path d="M0 0L10 10M10 0L0 10"></path></svg>
+    </button>
+  </div>
+
+  <div style="flex-grow: 1; background: #1B1B1B; padding: 32px 48px; box-sizing: border-box; font-family: 'JetBrains Mono', Consolas, monospace; font-size: 14px; line-height: 26px; color: #D4D4D4; display: flex; flex-direction: column">
+    <div style="color: #E4E4E4">Bank</div>
+    <div style="display: flex; gap: 0"><span style="width: 120px; color: #8A8A8A">  user</span><span>jdoe.personal</span></div>
+    <div style="display: flex; align-items: center"><span style="width: 120px; color: #8A8A8A">  password</span>
+      <span style="background: #252525; border-radius: 4px; padding: 0 8px; letter-spacing: 2px; color: #9A9A9A">••••••••••••</span>
+      <button aria-label="Reveal for 5 seconds" style="width: 26px; height: 26px; display: flex; align-items: center; justify-content: center; margin-left: 8px">
+        <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="#7A7A7A" stroke-width="1.2" aria-hidden="true"><path d="M1 8s2.5-5 7-5 7 5 7 5-2.5 5-7 5-7-5-7-5z"></path><circle cx="8" cy="8" r="2"></circle></svg>
+      </button>
+      <button aria-label="Copy" style="width: 26px; height: 26px; display: flex; align-items: center; justify-content: center">
+        <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="#7A7A7A" stroke-width="1.2" aria-hidden="true"><rect x="5" y="5" width="9" height="9" rx="1.5"></rect><path d="M11 5V3.5A1.5 1.5 0 0 0 9.5 2h-6A1.5 1.5 0 0 0 2 3.5v6A1.5 1.5 0 0 0 3.5 11H5"></path></svg>
+      </button>
+    </div>
+    <div style="height: 26px"></div>
+    <div style="color: #E4E4E4">Email</div>
+    <div style="display: flex"><span style="width: 120px; color: #8A8A8A">  address</span><span>me@example.com</span></div>
+    <div style="display: flex; align-items: center"><span style="width: 120px; color: #8A8A8A">  password</span>
+      <span style="background: #252525; border-radius: 4px; padding: 0 8px; letter-spacing: 2px; color: #9A9A9A">••••••••••••</span>
+      <button aria-label="Reveal for 5 seconds" style="width: 26px; height: 26px; display: flex; align-items: center; justify-content: center; margin-left: 8px">
+        <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="#7A7A7A" stroke-width="1.2" aria-hidden="true"><path d="M1 8s2.5-5 7-5 7 5 7 5-2.5 5-7 5-7-5-7-5z"></path><circle cx="8" cy="8" r="2"></circle></svg>
+      </button>
+      <button aria-label="Copy" style="width: 26px; height: 26px; display: flex; align-items: center; justify-content: center">
+        <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="#7A7A7A" stroke-width="1.2" aria-hidden="true"><rect x="5" y="5" width="9" height="9" rx="1.5"></rect><path d="M11 5V3.5A1.5 1.5 0 0 0 9.5 2h-6A1.5 1.5 0 0 0 2 3.5v6A1.5 1.5 0 0 0 3.5 11H5"></path></svg>
+      </button>
+    </div>
+    <div style="height: 26px"></div>
+    <div style="color: #E4E4E4">Home Wi-Fi</div>
+    <div style="display: flex"><span style="width: 120px; color: #8A8A8A">  network</span><span>HOME-5G</span></div>
+    <div style="display: flex; align-items: center"><span style="width: 120px; color: #8A8A8A">  key</span>
+      <span style="background: #252525; border-radius: 4px; padding: 0 8px; letter-spacing: 2px; color: #9A9A9A">••••••••••••</span>
+      <button aria-label="Reveal for 5 seconds" style="width: 26px; height: 26px; display: flex; align-items: center; justify-content: center; margin-left: 8px">
+        <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="#7A7A7A" stroke-width="1.2" aria-hidden="true"><path d="M1 8s2.5-5 7-5 7 5 7 5-2.5 5-7 5-7-5-7-5z"></path><circle cx="8" cy="8" r="2"></circle></svg>
+      </button>
+      <button aria-label="Copy" style="width: 26px; height: 26px; display: flex; align-items: center; justify-content: center">
+        <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="#7A7A7A" stroke-width="1.2" aria-hidden="true"><rect x="5" y="5" width="9" height="9" rx="1.5"></rect><path d="M11 5V3.5A1.5 1.5 0 0 0 9.5 2h-6A1.5 1.5 0 0 0 2 3.5v6A1.5 1.5 0 0 0 3.5 11H5"></path></svg>
+      </button>
+    </div>
+    <div style="height: 26px"></div>
+    <div style="display: flex; align-items: center"><span>Router admin: 192.168.1.1</span><span style="width: 1px; height: 18px; background: #E4E4E4; margin-left: 1px"></span></div>
+  </div>
+
+  <div style="height: 30px; flex-shrink: 0; display: flex; align-items: center; gap: 20px; padding: 0 16px; border-top: 1px solid #242424; font-size: 12px; color: #8A8A8A">
+    <span>Encrypted</span>
+    <span>Hardened</span>
+    <span style="display: flex; align-items: center; gap: 6px"><span style="width: 6px; height: 6px; border-radius: 3px; background: #6E9C7A"></span>USB key connected</span>
+    <span>Locks in 4:52</span>
+    <div style="flex-grow: 1"></div>
+    <span>Ln 12, Col 26</span>
+    <span>UTF-8</span>
+  </div>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1100,"height":680}}'>
+class Component extends DCLogic {
+renderVals() {
+return {};
+}
+}
+</script>
+</body>
+</html>
