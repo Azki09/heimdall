@@ -500,6 +500,27 @@ heimdall/
 | **v1.1** | YubiKey/FIDO2 |
 | **Futuro** | Shamir 2-de-3, Linux/macOS |
 
+### 14.1 Estado (2026-10-28)
+
+- **v0.1 — hecho.** `crates/heimdall-core`, con pruebas (ver §5.5).
+- **v0.2 — hecho, con pendientes.** `crates/heimdall-app` (ejecutable `heimdall.exe`). Probado a mano de punta a punta: crear, abrir, contraseña incorrecta, pestañas, renombrar, autoguardado, papelera, bloqueo manual y por inactividad, entrar con el código de recuperación, portapapeles.
+
+Decisiones tomadas al implementar la v0.2:
+- **Solo perfil Basic.** Hardened y Paranoid aparecen en el asistente, deshabilitados, con la nota "arrives in version 0.3".
+- **Fortaleza mínima de la contraseña:** puntuación zxcvbn ≥ 2 de 4 (offline). Por debajo, *Continue* queda deshabilitado.
+- **Entrada a Settings:** botón *Settings* junto a *Lock* en la barra de título (el mockup no mostraba cómo se llegaba), y Ctrl+, como atajo.
+- **Si el guardado falla al bloquear, la vault no se bloquea** y el error se muestra en la barra de estado: se prefiere no perder trabajo.
+- **Pestaña activa y posición del cursor:** no disparan el autoguardado, pero se guardan siempre al bloquear y al cerrar.
+- **Al bloquear se borra toda la memoria de egui** (estado de los campos de texto, historial de deshacer), además de la MK y las notas.
+- **La lista de vaults recientes** vive en `%APPDATA%\Heimdall\recent.txt` (en claro, como dice §6.1), solo para las vaults que lo permiten.
+- **La ventana no guarda su tamaño ni su posición** en disco.
+
+Pendiente de la v0.2:
+- **Imprimir la hoja de recuperación.** El botón no está: la app no puede escribir el código a disco (§7), así que hace falta imprimir directamente con la API de Windows. Por ahora el usuario copia las palabras a mano.
+- **Buscar** (Ctrl+F) y el menú `⌄` con la lista de pestañas cuando no caben.
+- **Ajustes *Line numbers* y *Spell check*:** se guardan en el modelo, pero aún no se muestran en Settings ni hacen nada.
+- **Bloquear al bloquear Windows o al suspender:** pasa a la v0.4, con el resto de §12.
+
 ---
 
 ## 15. Diseño visual

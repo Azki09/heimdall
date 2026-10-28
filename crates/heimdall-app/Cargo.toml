@@ -1,0 +1,24 @@
+[package]
+name = "heimdall-app"
+description = "Heimdall: an encrypted notepad. No signal. No trace."
+version = "0.2.0"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "heimdall"
+path = "src/main.rs"
+
+[dependencies]
+heimdall-core = { path = "../heimdall-core" }
+eframe = "0.31"
+rfd = "0.15"
+arboard = { version = "3", default-features = false }
+zxcvbn = "2"
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+zeroize = "1.8"
+uuid = "1"
+
+[lints]
+workspace = true

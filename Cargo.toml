@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/heimdall-core"]
+members = ["crates/heimdall-core", "crates/heimdall-app"]
 
 [workspace.package]
 version = "0.1.0"

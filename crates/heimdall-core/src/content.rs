@@ -143,7 +143,7 @@ pub struct Note {
     pub body: String,
     pub created: Timestamp,
     pub modified: Timestamp,
-    /// Cursor position as a byte offset into `body`.
+    /// Cursor position, in characters (not bytes) from the start of `body`.
     pub cursor: u64,
     /// Set only while the note is in the trash.
     pub deleted_at: Option<Timestamp>,
