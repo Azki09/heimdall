@@ -632,6 +632,14 @@ fn status_bar(ctx: &egui::Context, s: &Session, st: &EditorState, last_input: In
                     if sec.is_custom() { " · Custom" } else { "" }
                 );
                 small(ui, &profile);
+                if let Some(p) = &s.presence {
+                    ui.horizontal(|ui| {
+                        ui.spacing_mut().item_spacing.x = 8.0;
+                        let (r, _) = ui.allocate_exact_size(vec2(6.0, 6.0), Sense::hover());
+                        widgets::dot(ui.painter(), r.center(), OK);
+                        small(ui, "USB key connected").on_hover_text(&p.key_label);
+                    });
+                }
                 if let Some(secs) = sec.lock_after_s {
                     let left = (secs as u64).saturating_sub(last_input.elapsed().as_secs());
                     small(ui, &format!("Locks in {}:{:02}", left / 60, left % 60));

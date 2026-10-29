@@ -63,6 +63,27 @@ impl LockedVault {
         self.file.header.requires_keyfile()
     }
 
+    /// Whether a USB key can open this vault, required or not (a Basic vault
+    /// that was downgraded from Hardened keeps its USB slots, §6.2).
+    pub fn has_keyfile_slots(&self) -> bool {
+        self.file
+            .header
+            .known_slots()
+            .any(|s| matches!(s.kind, SlotKind::PasswordKeyfile { .. }))
+    }
+
+    /// Whether `keyfile` is enrolled in this vault. A key file of the right
+    /// vault that matches no slot was revoked (or belongs to an older copy).
+    pub fn accepts_keyfile(&self, keyfile: &Keyfile) -> bool {
+        let hint = keyfile.hint();
+        keyfile.vault_id() == self.vault_id()
+            && self
+                .file
+                .header
+                .known_slots()
+                .any(|s| s.kind == SlotKind::PasswordKeyfile { hint })
+    }
+
     /// "This vault has an access method this version doesn't support" (§5.2).
     pub fn has_unsupported_slots(&self) -> bool {
         self.file.header.has_unknown_slots()
@@ -219,6 +240,19 @@ impl Vault {
 
     pub fn vault_id(&self) -> &VaultId {
         &self.vault_id
+    }
+
+    /// A second copy of the open vault, MK included. Access changes run
+    /// Argon2id several times; the app runs them on a copy in a background
+    /// thread and swaps it in when done, so the window never freezes.
+    pub fn duplicate(&self) -> Vault {
+        Vault {
+            vault_id: self.vault_id,
+            slots: self.slots.clone(),
+            mk: crypto::new_key(*zeroize::Zeroizing::new(*self.mk.expose_secret())),
+            content: self.content.clone(),
+            opened_with: self.opened_with,
+        }
     }
 
     pub fn opened_with(&self) -> UnlockMethod {

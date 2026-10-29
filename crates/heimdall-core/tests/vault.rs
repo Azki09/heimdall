@@ -369,3 +369,29 @@ fn notes_survive_a_full_save_cycle_on_disk() {
     assert_eq!(main.content.note(id).unwrap().body, "second");
     assert_eq!(bak.content.note(id).unwrap().body, "first");
 }
+
+#[test]
+fn keyfile_enrollment_checks_and_duplicate() {
+    let new = Vault::create_with_kdf(&pw("pw"), Profile::Hardened, FAST).unwrap();
+    let kf = new.keyfile.unwrap();
+    let mut vault = new.vault;
+    let locked = reopen(&vault);
+    assert!(locked.has_keyfile_slots());
+    assert!(locked.accepts_keyfile(&kf));
+    assert!(locked.accepts_keyfile(&kf.clone()));
+
+    let other_vault = Keyfile::generate([9; 16]).unwrap();
+    assert!(!locked.accepts_keyfile(&other_vault));
+    let not_enrolled = Keyfile::generate(*vault.vault_id()).unwrap();
+    assert!(!locked.accepts_keyfile(&not_enrolled));
+
+    // A rotation done on a duplicate opens the same way and replaces the original.
+    let mut copy = vault.duplicate();
+    copy.rotate_master_key(&pw("pw"), &[&kf], &[], FAST).unwrap();
+    vault = copy;
+    let v = reopen(&vault).unlock_with_password(&pw("pw"), Some(&kf)).unwrap();
+    assert_eq!(v.content, vault.content);
+
+    let basic = Vault::create_with_kdf(&pw("pw"), Profile::Basic, FAST).unwrap();
+    assert!(!reopen(&basic.vault).has_keyfile_slots());
+}

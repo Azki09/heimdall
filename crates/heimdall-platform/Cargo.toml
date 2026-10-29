@@ -1,0 +1,24 @@
+[package]
+name = "heimdall-platform"
+description = "Heimdall OS-specific code: USB drives and process settings. Windows first."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.59", features = [
+    "Win32_Foundation",
+    "Win32_Security",
+    "Win32_Storage_FileSystem",
+    "Win32_System_Diagnostics_Debug",
+    "Win32_System_IO",
+    "Win32_System_Ioctl",
+    "Win32_System_WindowsProgramming",
+] }
+
+# The only crate allowed to call the OS through FFI. `unsafe` is denied
+# (not forbidden) so the Windows module can opt in, with a SAFETY note on
+# every block.
+[lints.rust]
+unsafe_code = "deny"

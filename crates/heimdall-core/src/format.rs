@@ -3,6 +3,8 @@
 
 use std::fmt;
 
+use serde::{Deserialize, Serialize};
+
 use crate::crypto::{KdfParams, KEY_LEN, NONCE_LEN, SALT_LEN, TAG_LEN};
 use crate::error::{Error, Result};
 
@@ -24,7 +26,8 @@ const SLOT_BODY_LEN_KEYFILE: usize = SLOT_BODY_LEN + HINT_LEN;
 
 pub type VaultId = [u8; 16];
 
-#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+/// Serializable so the encrypted content can name each access (DESIGN §5.3).
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct SlotId(pub [u8; 8]);
 
 impl fmt::Display for SlotId {

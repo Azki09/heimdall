@@ -1,4 +1,6 @@
+pub mod access;
 pub mod editor;
+pub mod keys;
 pub mod settings;
 pub mod unlock;
 pub mod welcome;

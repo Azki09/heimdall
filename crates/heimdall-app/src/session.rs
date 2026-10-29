@@ -1,17 +1,37 @@
-//! An open vault: the decrypted [`Vault`] plus bookkeeping for saving.
+//! An open vault: the decrypted [`Vault`], the USB key it was opened with,
+//! and bookkeeping for saving.
 
 use std::collections::HashSet;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
+use eframe::egui;
 use heimdall_core::storage::{save_vault, SaveKind};
-use heimdall_core::Vault;
+use heimdall_core::{SlotId, SlotKind, Vault};
 use uuid::Uuid;
 
 use crate::support::{error_message, file_name};
+use crate::usb::{Presence, UsbKey};
 
 /// Encrypted autosave runs this long after the last change (DESIGN §10.2).
 pub const AUTOSAVE_DELAY: Duration = Duration::from_secs(2);
+
+/// After an access change: labels the slots that are not in `before` (just
+/// created) with today's date, naming the one `usb` opens after its drive,
+/// and forgets the labels of slots that are gone.
+pub fn label_new_slots(vault: &mut Vault, before: &[SlotId], usb: Option<&UsbKey>) {
+    let now = heimdall_core::content::now();
+    let infos = vault.slot_infos();
+    for info in infos.iter().filter(|i| !before.contains(&i.id)) {
+        let name = match (info.kind, usb) {
+            (SlotKind::PasswordKeyfile { hint }, Some(k)) if k.keyfile.hint() == hint => k.drive.name.clone(),
+            _ => String::new(),
+        };
+        vault.content.set_label(info.id, &name, now);
+    }
+    let live: Vec<SlotId> = infos.iter().map(|i| i.id).collect();
+    vault.content.retain_labels(&live);
+}
 
 pub struct Session {
     pub vault: Vault,
@@ -25,11 +45,18 @@ pub struct Session {
     pub last_change: Instant,
     pub last_saved: Option<i64>,
     pub save_error: Option<String>,
+    /// The USB key used to unlock (or enrolled at creation), if any.
+    pub usb: Option<UsbKey>,
+    /// Watching `usb`; only while the vault requires its key (DESIGN §8.3).
+    pub presence: Option<Presence>,
+    /// The slots changed since the last save: the next save also replaces
+    /// the `.bak`, or it would keep opening the old way (DESIGN §5.4).
+    pub access_changed: bool,
 }
 
 impl Session {
-    pub fn new(vault: Vault, path: PathBuf) -> Self {
-        Self {
+    pub fn new(ctx: &egui::Context, vault: Vault, path: PathBuf, usb: Option<UsbKey>) -> Self {
+        let mut s = Self {
             vault,
             path,
             dirty_notes: HashSet::new(),
@@ -38,7 +65,32 @@ impl Session {
             last_change: Instant::now(),
             last_saved: None,
             save_error: None,
-        }
+            usb,
+            presence: None,
+            access_changed: false,
+        };
+        s.update_presence(ctx);
+        s
+    }
+
+    /// Starts or stops presence mode after the slots changed: it is on
+    /// exactly when the vault can't be opened without a USB key.
+    pub fn update_presence(&mut self, ctx: &egui::Context) {
+        let usb = self.usb.as_ref().filter(|k| self.key_slot(k).is_some());
+        self.presence = match (usb, self.vault.requires_keyfile()) {
+            (Some(key), true) => Some(Presence::start(ctx, key)),
+            _ => None,
+        };
+    }
+
+    /// The slot `key` opens, if it is still enrolled.
+    pub fn key_slot(&self, key: &UsbKey) -> Option<SlotId> {
+        let hint = key.keyfile.hint();
+        self.vault
+            .slot_infos()
+            .into_iter()
+            .find(|s| s.kind == SlotKind::PasswordKeyfile { hint })
+            .map(|s| s.id)
     }
 
     pub fn file_name(&self) -> String {
@@ -62,12 +114,18 @@ impl Session {
         self.dirty && self.vault.content.editor.autosave && self.last_change.elapsed() >= AUTOSAVE_DELAY
     }
 
-    /// Encrypts and writes the whole vault (atomic, keeps `.bak`).
+    /// Encrypts and writes the whole vault (atomic). Keeps the previous
+    /// version as `.bak`, unless the access changed.
     pub fn save(&mut self) -> bool {
+        let kind = if self.access_changed {
+            SaveKind::AccessChanged
+        } else {
+            SaveKind::Normal
+        };
         let result = self
             .vault
             .to_bytes()
-            .and_then(|bytes| save_vault(&self.path, &bytes, SaveKind::Normal));
+            .and_then(|bytes| save_vault(&self.path, &bytes, kind));
         match result {
             Ok(()) => {
                 self.dirty = false;
@@ -75,6 +133,7 @@ impl Session {
                 self.dirty_notes.clear();
                 self.last_saved = Some(heimdall_core::content::now());
                 self.save_error = None;
+                self.access_changed = false;
                 true
             }
             Err(e) => {
@@ -82,5 +141,51 @@ impl Session {
                 false
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use heimdall_core::{KdfParams, Profile, SecretString};
+
+    const FAST: KdfParams = KdfParams {
+        m_kib: KdfParams::MIN_M_KIB,
+        t: 1,
+        p: 1,
+    };
+
+    #[test]
+    fn labels_follow_the_slots() {
+        let pw = SecretString::from("pw".to_owned());
+        let new = Vault::create_with_kdf(&pw, Profile::Hardened, FAST).unwrap();
+        let kf = new.keyfile.unwrap();
+        let mut vault = new.vault;
+        let key = UsbKey {
+            keyfile: kf.clone(),
+            path: "E:\\v.bifrost".into(),
+            drive: heimdall_platform::Drive {
+                root: "E:\\".into(),
+                name: "KINGSTON".into(),
+                size: 0,
+            },
+        };
+        label_new_slots(&mut vault, &[], Some(&key));
+        let infos = vault.slot_infos();
+        assert_eq!(vault.content.access.len(), 2);
+        let key_slot = infos
+            .iter()
+            .find(|i| matches!(i.kind, SlotKind::PasswordKeyfile { .. }))
+            .unwrap();
+        assert_eq!(vault.content.label(key_slot.id).unwrap().name, "KINGSTON");
+
+        // Rotation keeps the key slot's id (and label) and replaces the recovery slot.
+        let before: Vec<SlotId> = infos.iter().map(|i| i.id).collect();
+        vault.rotate_master_key(&pw, &[&kf], &[], FAST).unwrap();
+        label_new_slots(&mut vault, &before, None);
+        assert_eq!(vault.content.access.len(), 2);
+        assert_eq!(vault.content.label(key_slot.id).unwrap().name, "KINGSTON");
+        let live: Vec<SlotId> = vault.slot_infos().iter().map(|i| i.id).collect();
+        assert!(vault.content.access.iter().all(|l| live.contains(&l.slot)));
     }
 }

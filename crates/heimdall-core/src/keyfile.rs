@@ -65,6 +65,17 @@ impl Keyfile {
     }
 }
 
+/// A copy is needed to hand the key to a background thread (Argon2id runs
+/// off the UI thread) while the app keeps watching the drive.
+impl Clone for Keyfile {
+    fn clone(&self) -> Self {
+        Self {
+            vault_id: self.vault_id,
+            secret: crypto::new_key(*Zeroizing::new(*self.secret.expose_secret())),
+        }
+    }
+}
+
 impl std::fmt::Debug for Keyfile {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Keyfile")

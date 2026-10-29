@@ -1,18 +1,19 @@
 //! The Create vault wizard (mockups Create*) and the forced "new password"
 //! flow after opening with the recovery code (DESIGN §9 steps 1 and 5).
-//! Both share the Password, Recovery code and Confirm steps.
+//! Both share the Password, USB key, Recovery code and Confirm steps.
 
 use std::path::{Path, PathBuf};
 
 use eframe::egui::{self, pos2, vec2, Align2, CornerRadius, Sense, Stroke, StrokeKind, Ui};
-use heimdall_core::content::SecuritySettings;
 use heimdall_core::storage::{save_vault, SaveKind};
-use heimdall_core::{Error, KdfParams, Profile, RecoveryCode, Vault};
+use heimdall_core::{KdfParams, Keyfile, Profile, RecoveryCode, SecretString, Vault};
 
 use crate::app::Action;
 use crate::chrome;
+use crate::screens::keys::{self, CodeCheck};
 use crate::support::{error_message, Job};
 use crate::theme::*;
+use crate::usb::{self, Drive, Scan, UsbKey};
 use crate::widgets::{self, ButtonKind, SecretField};
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -20,6 +21,7 @@ enum Step {
     Name,
     Profile,
     Password,
+    UsbKey,
     Recovery,
     Confirm,
 }
@@ -30,6 +32,7 @@ impl Step {
             Step::Name => "Name",
             Step::Profile => "Profile",
             Step::Password => "Password",
+            Step::UsbKey => "USB key",
             Step::Recovery => "Recovery code",
             Step::Confirm => "Confirm",
         }
@@ -43,10 +46,11 @@ enum Mode {
         profile: Profile,
     },
     /// Opened with the recovery code; `vault` is `None` while a job runs.
-    Reset { path: PathBuf },
+    /// The profile is kept, so Hardened and Paranoid enroll a new USB key.
+    Reset { path: PathBuf, profile: Profile },
 }
 
-type KeysJob = Job<(Option<Vault>, Result<RecoveryCode, Error>)>;
+type KeysJob = Job<(Option<Vault>, Result<(RecoveryCode, Option<UsbKey>), String>)>;
 
 pub struct Wizard {
     mode: Mode,
@@ -57,9 +61,19 @@ pub struct Wizard {
     vault: Option<Vault>,
     code: Option<RecoveryCode>,
     job: Option<KeysJob>,
-    check_idx: [usize; 3],
-    check_words: [String; 3],
+    check: CodeCheck,
+    drives: Scan<Vec<Drive>>,
+    drive: Option<PathBuf>,
+    /// The key file written to the drive. Deleted again if the wizard is
+    /// left before the vault is saved: it would open nothing.
+    usb: Option<UsbKey>,
     error: Option<String>,
+}
+
+impl Drop for Wizard {
+    fn drop(&mut self) {
+        self.discard_key();
+    }
 }
 
 impl Wizard {
@@ -80,7 +94,8 @@ impl Wizard {
     }
 
     pub fn reset(vault: Vault, path: PathBuf) -> Self {
-        Self::with_mode(Mode::Reset { path }, Step::Password, Some(vault))
+        let profile = vault.content.security.profile;
+        Self::with_mode(Mode::Reset { path, profile }, Step::Password, Some(vault))
     }
 
     fn with_mode(mode: Mode, step: Step, vault: Option<Vault>) -> Self {
@@ -93,29 +108,65 @@ impl Wizard {
             vault,
             code: None,
             job: None,
-            check_idx: [0, 1, 2],
-            check_words: Default::default(),
+            check: CodeCheck::new(),
+            drives: usb::drive_scan(),
+            drive: None,
+            usb: None,
             error: None,
         }
     }
 
-    fn steps(&self) -> &'static [Step] {
+    fn profile(&self) -> Profile {
         match self.mode {
-            Mode::Create { .. } => &[
-                Step::Name,
-                Step::Profile,
-                Step::Password,
-                Step::Recovery,
-                Step::Confirm,
-            ],
-            Mode::Reset { .. } => &[Step::Password, Step::Recovery, Step::Confirm],
+            Mode::Create { profile, .. } | Mode::Reset { profile, .. } => profile,
         }
+    }
+
+    /// Hardened and Paranoid need a USB key (DESIGN §6).
+    fn needs_usb(&self) -> bool {
+        self.profile() != Profile::Basic
+    }
+
+    fn steps(&self) -> Vec<Step> {
+        let mut steps = match self.mode {
+            Mode::Create { .. } => vec![Step::Name, Step::Profile, Step::Password],
+            Mode::Reset { .. } => vec![Step::Password],
+        };
+        if self.needs_usb() {
+            steps.push(Step::UsbKey);
+        }
+        steps.extend([Step::Recovery, Step::Confirm]);
+        steps
     }
 
     fn target_path(&self) -> PathBuf {
         match &self.mode {
             Mode::Create { name, folder, .. } => folder.join(format!("{}.heim", name.trim())),
-            Mode::Reset { path } => path.clone(),
+            Mode::Reset { path, .. } => path.clone(),
+        }
+    }
+
+    /// `personal` for `personal.heim`: the key file is `personal.bifrost`.
+    fn key_stem(&self) -> String {
+        self.target_path()
+            .file_stem()
+            .map(|s| s.to_string_lossy().into_owned())
+            .unwrap_or_else(|| "vault".into())
+    }
+
+    fn selected_drive(&self) -> Option<Drive> {
+        let root = self.drive.as_ref()?;
+        self.drives
+            .value
+            .as_ref()?
+            .iter()
+            .find(|d| &d.root == root)
+            .cloned()
+    }
+
+    fn discard_key(&mut self) {
+        if let Some(key) = self.usb.take() {
+            let _ = std::fs::remove_file(&key.path);
         }
     }
 
@@ -124,12 +175,19 @@ impl Wizard {
             self.job = None;
             self.vault = vault;
             match result {
-                Ok(code) => {
+                Ok((code, usb)) => {
                     self.code = Some(code);
+                    self.usb = usb;
+                    self.password.clear();
+                    self.confirm.clear();
+                    self.strength = None;
                     self.step = Step::Recovery;
                 }
-                Err(e) => self.error = Some(error_message(&e)),
+                Err(e) => self.error = Some(e),
             }
+        }
+        if self.step == Step::UsbKey {
+            self.drives.poll(ctx);
         }
 
         let title = match self.mode {
@@ -173,6 +231,7 @@ impl Wizard {
                             Step::Name => self.name_ui(ui),
                             Step::Profile => self.profile_ui(ui),
                             Step::Password => self.password_ui(ui),
+                            Step::UsbKey => self.usb_ui(ui),
                             Step::Recovery => self.recovery_ui(ui),
                             Step::Confirm => self.confirm_ui(ui),
                         }
@@ -220,6 +279,7 @@ impl Wizard {
         ui.horizontal(|ui| {
             let (back_label, next_label) = match self.step {
                 Step::Name => ("Cancel", "Continue"),
+                Step::UsbKey => ("Back", "Write key to drive"),
                 Step::Recovery => ("Back", "I've written it down"),
                 Step::Confirm => (
                     "Show the words again",
@@ -267,18 +327,14 @@ impl Wizard {
             Step::Name => self.name_problem().is_none(),
             Step::Profile => true,
             Step::Password => {
-                self.strength.as_ref().is_some_and(|(score, _)| *score >= 2)
+                self.strength
+                    .as_ref()
+                    .is_some_and(|(score, _)| *score >= keys::MIN_SCORE)
                     && self.password.text == self.confirm.text
             }
+            Step::UsbKey => self.selected_drive().is_some(),
             Step::Recovery => self.code.is_some(),
-            Step::Confirm => match &self.code {
-                Some(code) => self
-                    .check_idx
-                    .iter()
-                    .zip(&self.check_words)
-                    .all(|(i, w)| code.check_word(*i, w)),
-                None => false,
-            },
+            Step::Confirm => self.code.as_ref().is_some_and(|c| self.check.complete(c)),
         }
     }
 
@@ -308,11 +364,14 @@ impl Wizard {
             Step::Name => return Some(Action::Welcome),
             Step::Profile => self.step = Step::Name,
             Step::Password => self.step = Step::Profile,
+            Step::UsbKey => self.step = Step::Password,
             Step::Recovery => {
                 self.code = None;
+                self.discard_key();
                 if matches!(self.mode, Mode::Create { .. }) {
                     self.vault = None;
                 }
+                // The password was wiped once the keys were made: type it again.
                 self.step = Step::Password;
             }
             Step::Confirm => self.step = Step::Recovery,
@@ -325,9 +384,10 @@ impl Wizard {
         match self.step {
             Step::Name => self.step = Step::Profile,
             Step::Profile => self.step = Step::Password,
-            Step::Password => self.generate_keys(ctx),
+            Step::Password if self.needs_usb() => self.step = Step::UsbKey,
+            Step::Password | Step::UsbKey => self.generate_keys(ctx),
             Step::Recovery => {
-                self.pick_check_words();
+                self.check = CodeCheck::new();
                 self.step = Step::Confirm;
             }
             Step::Confirm => return self.finish(),
@@ -335,16 +395,38 @@ impl Wizard {
         None
     }
 
+    /// Runs Argon2id in the background: creates the vault (or replaces all
+    /// its access after recovery) and, for Hardened / Paranoid, writes the
+    /// key file to the chosen drive. The password stays in its field until
+    /// this succeeds, so a failed write can simply be retried.
     fn generate_keys(&mut self, ctx: &egui::Context) {
-        let pw = self.password.take();
-        self.confirm.clear();
-        self.strength = None;
+        let pw = SecretString::from(self.password.text.clone());
+        let profile = self.profile();
+        let drive = if self.needs_usb() {
+            match self.selected_drive() {
+                Some(d) => Some(d),
+                None => return,
+            }
+        } else {
+            None
+        };
+        let stem = self.key_stem();
+        let write = move |kf: &Keyfile| -> Result<Option<UsbKey>, String> {
+            match &drive {
+                Some(d) => usb::write_key(d, &stem, kf)
+                    .map(Some)
+                    .map_err(|e| format!("Couldn't write the key to {}: {e}", usb::drive_label(d))),
+                None => Ok(None),
+            }
+        };
         match &self.mode {
-            Mode::Create { profile, .. } => {
-                let profile = *profile;
+            Mode::Create { .. } => {
                 self.job = Some(Job::spawn(ctx, move || match Vault::create(&pw, profile) {
-                    Ok(new) => (Some(new.vault), Ok(new.recovery_code)),
-                    Err(e) => (None, Err(e)),
+                    Ok(new) => match new.keyfile.as_ref().map_or(Ok(None), write) {
+                        Ok(usb) => (Some(new.vault), Ok((new.recovery_code, usb))),
+                        Err(e) => (None, Err(e)),
+                    },
+                    Err(e) => (None, Err(error_message(&e))),
                 }));
             }
             Mode::Reset { .. } => {
@@ -352,35 +434,42 @@ impl Wizard {
                     return;
                 };
                 self.job = Some(Job::spawn(ctx, move || {
-                    // USB keys arrive in v0.3: after recovery the vault opens with the password alone.
-                    let result = vault.reset_access(&pw, &[], true, KdfParams::for_profile(Profile::Basic));
-                    if result.is_ok() && vault.content.security.profile != Profile::Basic {
-                        vault.content.security = SecuritySettings::defaults_for(Profile::Basic);
+                    let kdf = KdfParams::for_profile(profile);
+                    if profile == Profile::Basic {
+                        let result = vault.reset_access(&pw, &[], true, kdf);
+                        return (
+                            Some(vault),
+                            result.map(|c| (c, None)).map_err(|e| error_message(&e)),
+                        );
                     }
-                    (Some(vault), result)
+                    // The old USB keys may be lost: every slot is replaced and a new key is written.
+                    let kf = match Keyfile::generate(*vault.vault_id()) {
+                        Ok(k) => k,
+                        Err(e) => return (Some(vault), Err(error_message(&e))),
+                    };
+                    let usb = match write(&kf) {
+                        Ok(u) => u,
+                        Err(e) => return (Some(vault), Err(e)),
+                    };
+                    match vault.reset_access(&pw, &[&kf], false, kdf) {
+                        Ok(code) => (Some(vault), Ok((code, usb))),
+                        Err(e) => {
+                            if let Some(u) = &usb {
+                                let _ = std::fs::remove_file(&u.path);
+                            }
+                            (Some(vault), Err(error_message(&e)))
+                        }
+                    }
                 }));
             }
         }
     }
 
-    fn pick_check_words(&mut self) {
-        let mut idx: Vec<usize> = Vec::new();
-        while idx.len() < 3 {
-            let r = heimdall_core::crypto::random_bytes::<1>()
-                .map(|b| b[0] as usize % 12)
-                .unwrap_or(idx.len() * 4);
-            if !idx.contains(&r) {
-                idx.push(r);
-            }
-        }
-        idx.sort_unstable();
-        self.check_idx = [idx[0], idx[1], idx[2]];
-        self.check_words = Default::default();
-    }
-
     fn finish(&mut self) -> Option<Action> {
-        let vault = self.vault.take()?;
+        let mut vault = self.vault.take()?;
         let path = self.target_path();
+        // Every slot is new: label them for Settings → Access.
+        crate::session::label_new_slots(&mut vault, &[], self.usb.as_ref());
         let kind = match self.mode {
             Mode::Create { .. } => SaveKind::Normal,
             // Access changed: the .bak must not keep opening with the old password (DESIGN §5.4).
@@ -389,7 +478,8 @@ impl Wizard {
         match vault.to_bytes().and_then(|b| save_vault(&path, &b, kind)) {
             Ok(()) => {
                 self.code = None;
-                Some(Action::Opened { vault, path })
+                let usb = self.usb.take();
+                Some(Action::Opened { vault, path, usb })
             }
             Err(e) => {
                 self.error = Some(error_message(&e));
@@ -472,15 +562,15 @@ impl Wizard {
                 Profile::Hardened,
                 "Hardened",
                 "Password and a USB key. The vault locks when the key is removed.",
-                "Needs USB key support, which arrives in version 0.3.",
-                false,
+                "Locks after 5 min · Clipboard clears in 20 s",
+                true,
             ),
             (
                 Profile::Paranoid,
                 "Paranoid",
                 "Everything in Hardened, with shorter timeouts and slower unlocking.",
-                "Needs USB key support, which arrives in version 0.3.",
-                false,
+                "Locks after 2 min · Clipboard clears in 10 s · Locks when minimized",
+                true,
             ),
         ];
         for (value, title, desc, detail, enabled) in options {
@@ -566,10 +656,10 @@ impl Wizard {
             resp.request_focus();
         }
         if resp.changed() || (self.strength.is_none() && !self.password.text.is_empty()) {
-            self.strength = estimate_strength(&self.password.text);
+            self.strength = keys::estimate_strength(&self.password.text);
         }
         ui.add_space(4.0);
-        strength_meter(ui, self.strength.as_ref());
+        keys::strength_meter(ui, self.strength.as_ref(), 460.0);
         ui.add_space(20.0);
 
         widgets::label(ui, "Confirm password", 12.0, TEXT_MUTED);
@@ -584,25 +674,47 @@ impl Wizard {
         );
         self.password.reveal = reveal;
         ui.add_space(4.0);
-        if !self.confirm.text.is_empty() {
-            let matches = self.confirm.text == self.password.text;
-            ui.horizontal(|ui| {
-                if matches {
-                    let (r, _) = ui.allocate_exact_size(vec2(12.0, 12.0), Sense::hover());
-                    widgets::icon_check(ui.painter(), r.center(), 12.0, OK);
-                }
-                widgets::label(
-                    ui,
-                    if matches {
-                        "Passwords match"
-                    } else {
-                        "Passwords don't match"
-                    },
-                    12.0,
-                    TEXT_MUTED,
-                );
-            });
+        keys::match_line(ui, &self.password.text, &self.confirm.text);
+    }
+
+    fn usb_ui(&mut self, ui: &mut Ui) {
+        widgets::heading(ui, "Choose your USB key");
+        ui.add_space(2.0);
+        let intro = match self.mode {
+            Mode::Create { .. } => "The vault will only open, and only stay open, while this drive is connected.",
+            Mode::Reset { .. } => "Your old USB keys stop working. Choose a drive for a new key; the vault will only open, and only stay open, while it is connected.",
+        };
+        widgets::paragraph(ui, intro, 460.0);
+        ui.add_space(24.0);
+        if keys::drive_picker(ui, self.drives.value.as_deref(), &mut self.drive, 460.0) {
+            self.drives.refresh();
         }
+        ui.add_space(20.0);
+        let file = format!("{}.bifrost", self.key_stem());
+        ui.horizontal_wrapped(|ui| {
+            ui.set_max_width(460.0);
+            ui.spacing_mut().item_spacing.x = 0.0;
+            widgets::label(ui, "—  ", 13.0, TEXT_FAINT);
+            widgets::label(ui, "A small key file, ", 13.0, TEXT_MUTED);
+            ui.label(egui::RichText::new(file).font(mono(13.0)).color(TEXT_BODY));
+            widgets::label(
+                ui,
+                ", is written to the drive. Nothing else on it is touched.",
+                13.0,
+                TEXT_MUTED,
+            );
+        });
+        ui.add_space(4.0);
+        keys::bullet(
+            ui,
+            "",
+            "The key file alone opens nothing. Your password is still required.",
+        );
+        keys::bullet(
+            ui,
+            "",
+            "If you lose the drive, your recovery code still opens the vault.",
+        );
     }
 
     fn recovery_ui(&mut self, ui: &mut Ui) {
@@ -615,49 +727,9 @@ impl Wizard {
         );
         ui.add_space(24.0);
         let Some(code) = &self.code else { return };
-        let words = code.words();
-        let (rect, _) = ui.allocate_exact_size(vec2(460.0, 4.0 * 36.0 + 24.0), Sense::hover());
-        let painter = ui.painter();
-        painter.rect(
-            rect,
-            CornerRadius::same(8),
-            SURFACE,
-            Stroke::new(1.0_f32, BORDER),
-            StrokeKind::Inside,
-        );
-        for (i, word) in words.iter().enumerate() {
-            let col = (i / 4) as f32;
-            let row = (i % 4) as f32;
-            let x = rect.left() + 20.0 + col * 146.0;
-            let y = rect.top() + 12.0 + row * 36.0 + 18.0;
-            painter.text(
-                pos2(x + 18.0, y),
-                Align2::RIGHT_CENTER,
-                (i + 1).to_string(),
-                crate::theme::ui(12.0),
-                TEXT_FAINT,
-            );
-            painter.text(pos2(x + 30.0, y), Align2::LEFT_CENTER, *word, mono(15.0), TEXT);
-        }
+        keys::code_grid(ui, code, 460.0);
         ui.add_space(20.0);
-        for (lead, rest) in [
-            (
-                "This code opens the vault without your password.",
-                " Keep it like a passport.",
-            ),
-            (
-                "It is shown only once.",
-                " It is never saved to disk or copied to the clipboard.",
-            ),
-        ] {
-            ui.horizontal_wrapped(|ui| {
-                ui.spacing_mut().item_spacing.x = 0.0;
-                widgets::label(ui, "—  ", 13.0, TEXT_FAINT);
-                widgets::label(ui, lead, 13.0, TEXT_BODY);
-                widgets::label(ui, rest, 13.0, TEXT_MUTED);
-            });
-            ui.add_space(4.0);
-        }
+        keys::code_notes(ui);
     }
 
     fn confirm_ui(&mut self, ui: &mut Ui) {
@@ -670,89 +742,12 @@ impl Wizard {
         );
         ui.add_space(24.0);
         let Some(code) = &self.code else { return };
-        let mut first_empty = None;
-        for k in 0..3 {
-            let idx = self.check_idx[k];
-            widgets::label(ui, &format!("Word {}", idx + 1), 12.0, TEXT_MUTED);
-            let id = egui::Id::new(("check_word", k));
-            widgets::text_field(ui, id, &mut self.check_words[k], 460.0, None, "");
-            let typed = self.check_words[k].trim();
-            if !typed.is_empty() {
-                let ok = code.check_word(idx, typed);
-                let (text, color) = if ok {
-                    ("Correct", TEXT_MUTED)
-                } else {
-                    ("Doesn't match word {n}", TEXT_MUTED)
-                };
-                let text = text.replace("{n}", &(idx + 1).to_string());
-                ui.horizontal(|ui| {
-                    if ok {
-                        let (r, _) = ui.allocate_exact_size(vec2(12.0, 12.0), Sense::hover());
-                        widgets::icon_check(ui.painter(), r.center(), 12.0, OK);
-                    }
-                    widgets::label(ui, &text, 12.0, color);
-                });
-            } else if first_empty.is_none() {
-                first_empty = Some(id);
-            }
-            ui.add_space(14.0);
-        }
-        if ui.memory(|m| m.focused().is_none()) {
-            if let Some(id) = first_empty {
-                ui.memory_mut(|m| m.request_focus(id));
-            }
-        }
+        self.check.ui(ui, code, 460.0);
     }
 }
 
 const STEP_TODO: egui::Color32 = egui::Color32::from_rgb(0x3A, 0x3A, 0x3A);
 const STEP_TODO_TEXT: egui::Color32 = egui::Color32::from_rgb(0x7A, 0x7A, 0x7A);
-
-/// `(score 0-4, label)` using zxcvbn, entirely offline.
-fn estimate_strength(pw: &str) -> Option<(u8, String)> {
-    let entropy = zxcvbn::zxcvbn(pw, &[]).ok()?;
-    let score = entropy.score();
-    let word = ["Very weak", "Weak", "Fair", "Good", "Strong"][score.min(4) as usize];
-    // zxcvbn assumes 10k guesses/s for a slow hash; Argon2id at 256 MiB is far slower.
-    let time = entropy
-        .crack_times()
-        .offline_slow_hashing_1e4_per_second()
-        .to_string();
-    let label = if score < 2 {
-        format!("{word} · try a longer password")
-    } else {
-        format!("{word} · {time} to guess")
-    };
-    Some((score, label))
-}
-
-fn strength_meter(ui: &mut Ui, strength: Option<&(u8, String)>) {
-    let (rect, _) = ui.allocate_exact_size(vec2(460.0, 18.0), Sense::hover());
-    let bars_w = 460.0 - 200.0;
-    let filled = strength.map(|(s, _)| (*s).max(1) as usize).unwrap_or(0);
-    let painter = ui.painter();
-    for i in 0..4 {
-        let w = (bars_w - 12.0) / 4.0;
-        let r = egui::Rect::from_min_size(
-            pos2(rect.left() + i as f32 * (w + 4.0), rect.center().y - 1.5),
-            vec2(w, 3.0),
-        );
-        painter.rect_filled(
-            r,
-            CornerRadius::same(2),
-            if i < filled { TEXT_SECONDARY } else { TRACK_OFF },
-        );
-    }
-    if let Some((_, label)) = strength {
-        painter.text(
-            pos2(rect.right(), rect.center().y),
-            Align2::RIGHT_CENTER,
-            label,
-            crate::theme::ui(12.0),
-            TEXT_MUTED,
-        );
-    }
-}
 
 /// `C:\Users\me\Documents\x.heim` → `Documents\x.heim`.
 fn display_path(p: &Path) -> String {

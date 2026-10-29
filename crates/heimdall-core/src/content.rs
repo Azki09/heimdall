@@ -8,8 +8,10 @@ use zeroize::{Zeroize, Zeroizing};
 
 use crate::crypto::TAG_LEN;
 use crate::error::{Error, Result};
+use crate::format::SlotId;
 
-pub const CONTENT_VERSION: u16 = 1;
+/// 2 added [`Content::access`] (v0.3). Version 1 is still read.
+pub const CONTENT_VERSION: u16 = 2;
 /// Plaintext is padded to a multiple of this (DESIGN §5.3).
 pub const PAD_BLOCK: usize = 4096;
 /// Notes stay in the trash this long before being purged (DESIGN §10.3).
@@ -194,6 +196,17 @@ impl std::fmt::Debug for Note {
     }
 }
 
+/// What Settings → Access shows for a key slot: the USB drive's name and
+/// when it was added. Kept here, encrypted, because the header only holds
+/// what is needed to open the file (DESIGN §5.1).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AccessLabel {
+    pub slot: SlotId,
+    /// Drive name for a USB key ("KINGSTON"); empty for other slots.
+    pub name: String,
+    pub added: Timestamp,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Content {
     pub security: SecuritySettings,
@@ -202,6 +215,31 @@ pub struct Content {
     pub notes: Vec<Note>,
     pub active_note: Option<Uuid>,
     pub trash: Vec<Note>,
+    /// Labels for the key slots. Slots from before v0.3 have none.
+    pub access: Vec<AccessLabel>,
+}
+
+/// Content version 1 (v0.1, v0.2): no access labels.
+#[derive(Serialize, Deserialize)]
+struct ContentV1 {
+    security: SecuritySettings,
+    editor: EditorSettings,
+    notes: Vec<Note>,
+    active_note: Option<Uuid>,
+    trash: Vec<Note>,
+}
+
+impl From<ContentV1> for Content {
+    fn from(v1: ContentV1) -> Self {
+        Self {
+            security: v1.security,
+            editor: v1.editor,
+            notes: v1.notes,
+            active_note: v1.active_note,
+            trash: v1.trash,
+            access: Vec::new(),
+        }
+    }
 }
 
 impl Content {
@@ -214,7 +252,26 @@ impl Content {
             active_note: Some(note.id),
             notes: vec![note],
             trash: Vec::new(),
+            access: Vec::new(),
         }
+    }
+
+    pub fn label(&self, slot: SlotId) -> Option<&AccessLabel> {
+        self.access.iter().find(|l| l.slot == slot)
+    }
+
+    pub fn set_label(&mut self, slot: SlotId, name: &str, added: Timestamp) {
+        self.access.retain(|l| l.slot != slot);
+        self.access.push(AccessLabel {
+            slot,
+            name: name.to_owned(),
+            added,
+        });
+    }
+
+    /// Drops the labels of slots that no longer exist.
+    pub fn retain_labels(&mut self, live: &[SlotId]) {
+        self.access.retain(|l| live.contains(&l.slot));
     }
 
     pub fn note(&self, id: Uuid) -> Option<&Note> {
@@ -314,10 +371,12 @@ impl Content {
             return Err(Error::BadContent);
         }
         let (version, rest) = postcard::take_from_bytes::<u16>(body).map_err(|_| Error::BadContent)?;
-        if version != CONTENT_VERSION {
-            return Err(Error::UnsupportedContentVersion(version));
+        let (content, rest) = match version {
+            1 => postcard::take_from_bytes::<ContentV1>(rest).map(|(c, r)| (Content::from(c), r)),
+            CONTENT_VERSION => postcard::take_from_bytes::<Content>(rest),
+            other => return Err(Error::UnsupportedContentVersion(other)),
         }
-        let (content, rest) = postcard::take_from_bytes::<Content>(rest).map_err(|_| Error::BadContent)?;
+        .map_err(|_| Error::BadContent)?;
         if !rest.is_empty() {
             return Err(Error::BadContent);
         }
@@ -371,13 +430,48 @@ mod tests {
         ));
 
         let mut plain = c.to_padded_plaintext().unwrap().to_vec();
-        plain[4] = 2; // version varint
+        plain[4] = 3; // version varint
         assert!(matches!(
             Content::from_padded_plaintext(&plain),
-            Err(Error::UnsupportedContentVersion(2))
+            Err(Error::UnsupportedContentVersion(3))
         ));
 
         assert!(Content::from_padded_plaintext(&[0; 10]).is_err());
+    }
+
+    /// A vault saved by v0.1/v0.2 must keep opening.
+    #[test]
+    fn reads_version_1() {
+        let c = sample();
+        let v1 = ContentV1 {
+            security: c.security.clone(),
+            editor: c.editor.clone(),
+            notes: c.notes.clone(),
+            active_note: c.active_note,
+            trash: c.trash.clone(),
+        };
+        let mut body = postcard::to_allocvec(&1u16).unwrap();
+        body.extend_from_slice(&postcard::to_allocvec(&v1).unwrap());
+        let mut plain = (body.len() as u32).to_le_bytes().to_vec();
+        plain.extend_from_slice(&body);
+        plain.resize(PAD_BLOCK, 0);
+        assert_eq!(Content::from_padded_plaintext(&plain).unwrap(), c);
+    }
+
+    #[test]
+    fn access_labels() {
+        let mut c = sample();
+        let (a, b) = (SlotId([1; 8]), SlotId([2; 8]));
+        c.set_label(a, "KINGSTON", 5);
+        c.set_label(b, "", 6);
+        c.set_label(a, "KINGSTON (old)", 7);
+        assert_eq!(c.access.len(), 2);
+        assert_eq!(c.label(a).unwrap().name, "KINGSTON (old)");
+        c.retain_labels(&[b]);
+        assert!(c.label(a).is_none());
+        assert_eq!(c.label(b).unwrap().added, 6);
+        let plain = c.to_padded_plaintext().unwrap();
+        assert_eq!(Content::from_padded_plaintext(&plain).unwrap(), c);
     }
 
     #[test]

@@ -1,5 +1,5 @@
-//! Settings: Security, Editor, Trash and About (Settings mockups).
-//! Access management (passwords, USB keys) arrives with v0.3.
+//! Settings: Security, Access, Editor, Trash and About (Settings mockups).
+//! Access lives in its own module, `access.rs`.
 
 use eframe::egui::{self, pos2, vec2, Align2, CornerRadius, CursorIcon, Sense, Stroke, StrokeKind, Ui};
 use heimdall_core::content::{Font, LineEnding, Profile, SecuritySettings, TabInsert, TRASH_RETENTION_S};
@@ -7,6 +7,7 @@ use uuid::Uuid;
 
 use crate::app::Action;
 use crate::chrome;
+use crate::screens::access::Access;
 use crate::session::Session;
 use crate::support::{duration_label, RecentVaults};
 use crate::theme::*;
@@ -16,6 +17,7 @@ use crate::widgets::{self, setting_row, ButtonKind};
 enum Page {
     #[default]
     Security,
+    Access,
     Editor,
     Trash,
     About,
@@ -31,13 +33,22 @@ enum Confirm {
 pub struct Settings {
     page: Page,
     confirm: Option<Confirm>,
+    access: Access,
 }
 
 impl Settings {
+    /// See [`Access::holds_lock`].
+    pub fn holds_lock(&self) -> bool {
+        self.access.holds_lock()
+    }
+
     pub fn ui(&mut self, ctx: &egui::Context, s: &mut Session, recent: &mut RecentVaults) -> Option<Action> {
         let mut action = None;
-        if ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape))
+        self.access.poll(ctx, s, recent);
+        let locked_in = self.access.blocks_navigation();
+        if !locked_in
             && self.confirm.is_none()
+            && ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape))
         {
             return Some(Action::Notes);
         }
@@ -56,17 +67,18 @@ impl Settings {
             .show_separator_line(false)
             .show(ctx, |ui| {
                 ui.spacing_mut().item_spacing.y = 2.0;
-                if nav_item(ui, "Back to notes", false, true).clicked() {
+                if nav_item(ui, "Back to notes", false, true).clicked() && !locked_in {
                     action = Some(Action::Notes);
                 }
                 ui.add_space(18.0);
                 for (page, label) in [
                     (Page::Security, "Security"),
+                    (Page::Access, "Access"),
                     (Page::Editor, "Editor"),
                     (Page::Trash, "Trash"),
                     (Page::About, "About"),
                 ] {
-                    if nav_item(ui, label, self.page == page, false).clicked() {
+                    if nav_item(ui, label, self.page == page, false).clicked() && !locked_in {
                         self.page = page;
                     }
                 }
@@ -90,8 +102,13 @@ impl Settings {
                     .auto_shrink([false, false])
                     .show(ui, |ui| {
                         ui.set_max_width(600.0);
+                        if self.access.showing_code() {
+                            self.access.code_ui(ui);
+                            return;
+                        }
                         match self.page {
-                            Page::Security => security(ui, s, recent),
+                            Page::Security => security(ui, s, recent, &mut self.access),
+                            Page::Access => self.access.page(ui, s),
                             Page::Editor => editor(ui, s),
                             Page::Trash => self.trash(ui, s),
                             Page::About => about(ui),
@@ -100,6 +117,7 @@ impl Settings {
             });
 
         self.confirm_dialog(ctx, s);
+        self.access.dialog_ui(ctx, s);
         action
     }
 
@@ -353,7 +371,7 @@ fn combo<T: PartialEq + Copy>(ui: &mut Ui, id: &str, value: &mut T, options: &[(
     changed
 }
 
-fn security(ui: &mut Ui, s: &mut Session, recent: &mut RecentVaults) {
+fn security(ui: &mut Ui, s: &mut Session, recent: &mut RecentVaults, access: &mut Access) {
     widgets::heading(ui, "Security");
     ui.add_space(24.0);
     let sec = s.vault.content.security.clone();
@@ -387,11 +405,25 @@ fn security(ui: &mut Ui, s: &mut Session, recent: &mut RecentVaults) {
             crate::theme::ui(15.0),
             TEXT_MUTED,
         );
-        let mut child = ui.new_child(
-            egui::UiBuilder::new()
-                .max_rect(card.shrink(18.0))
-                .layout(egui::Layout::right_to_left(egui::Align::Center)),
-        );
+    }
+    let mut child = ui.new_child(
+        egui::UiBuilder::new()
+            .max_rect(card.shrink(18.0))
+            .layout(egui::Layout::right_to_left(egui::Align::Center)),
+    );
+    if widgets::button(
+        &mut child,
+        ButtonKind::Secondary,
+        "Change profile",
+        true,
+        vec2(0.0, 34.0),
+    )
+    .clicked()
+    {
+        access.open_profile(sec.profile);
+    }
+    if sec.is_custom() {
+        child.add_space(4.0);
         if widgets::button(
             &mut child,
             ButtonKind::Quiet,
@@ -474,16 +506,9 @@ fn security(ui: &mut Ui, s: &mut Session, recent: &mut RecentVaults) {
         }
         s.touch(None);
     }
-    ui.add_space(16.0);
-    widgets::label(
-        ui,
-        "Hardened and Paranoid profiles, USB keys and access management arrive in version 0.3.",
-        12.0,
-        TEXT_FAINT,
-    );
 }
 
-fn sync_recent(s: &Session, recent: &mut RecentVaults) {
+pub(super) fn sync_recent(s: &Session, recent: &mut RecentVaults) {
     if s.vault.content.security.remember_recent {
         recent.touch(&s.path);
     } else {

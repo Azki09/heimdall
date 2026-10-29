@@ -52,6 +52,8 @@ pub enum ButtonKind {
     Primary,
     Secondary,
     Danger,
+    /// Outlined with danger-colored text ("Revoke" in the Access mockup).
+    DangerOutline,
     /// Text only, muted (e.g. "Reset to profile defaults").
     Quiet,
 }
@@ -87,6 +89,11 @@ pub fn button(ui: &mut Ui, kind: ButtonKind, text: &str, enabled: bool, size: Ve
             if hovered { NAV_ACTIVE } else { Color32::TRANSPARENT },
             Stroke::new(1.0_f32, BORDER),
             if enabled { TEXT_SECONDARY } else { TEXT_FAINT },
+        ),
+        (ButtonKind::DangerOutline, _) => (
+            if hovered { NAV_ACTIVE } else { Color32::TRANSPARENT },
+            Stroke::new(1.0_f32, BORDER),
+            if enabled { DANGER } else { TEXT_FAINT },
         ),
         (ButtonKind::Quiet, _) => (
             Color32::TRANSPARENT,
@@ -172,6 +179,16 @@ impl Drop for SecretField {
     fn drop(&mut self) {
         self.text.zeroize();
     }
+}
+
+/// Drops what egui remembers about these text fields (their text and undo
+/// history), once the password typed in them has been used.
+pub fn forget_fields(ctx: &egui::Context, ids: &[&str]) {
+    ctx.data_mut(|d| {
+        for id in ids {
+            d.remove::<egui::text_edit::TextEditState>(egui::Id::new(*id));
+        }
+    });
 }
 
 /// A 42 px framed text field, optionally masked with a show/hide eye.
@@ -349,6 +366,40 @@ pub fn icon_lock(painter: &Painter, center: Pos2, color: Color32) {
     painter.add(egui::Shape::line(arc, s));
     painter.line_segment([p(4.0, 4.0), p(4.0, 5.5)], s);
     painter.line_segment([p(8.0, 4.0), p(8.0, 5.5)], s);
+}
+
+/// A USB stick on its side (Access mockup): body plus connector.
+pub fn icon_usb(painter: &Painter, center: Pos2, color: Color32) {
+    let p = scaled(center, 16.0, 16.0);
+    let s = Stroke::new(1.2_f32, color);
+    painter.rect_stroke(
+        Rect::from_min_max(p(2.0, 5.0), p(14.0, 12.0)),
+        1.5,
+        s,
+        StrokeKind::Middle,
+    );
+    painter.add(egui::Shape::line(
+        vec![p(5.0, 5.0), p(5.0, 3.5), p(11.0, 3.5), p(11.0, 5.0)],
+        s,
+    ));
+}
+
+/// A sheet with a folded corner and two lines: the recovery sheet.
+pub fn icon_sheet(painter: &Painter, center: Pos2, color: Color32) {
+    let p = scaled(center, 16.0, 16.0);
+    let s = Stroke::new(1.2_f32, color);
+    painter.add(egui::Shape::closed_line(
+        vec![
+            p(4.0, 2.0),
+            p(10.0, 2.0),
+            p(13.0, 5.0),
+            p(13.0, 14.0),
+            p(4.0, 14.0),
+        ],
+        s,
+    ));
+    painter.line_segment([p(6.0, 8.0), p(11.0, 8.0)], s);
+    painter.line_segment([p(6.0, 11.0), p(11.0, 11.0)], s);
 }
 
 pub fn icon_eye(painter: &Painter, center: Pos2, color: Color32) {

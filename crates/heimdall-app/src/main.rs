@@ -7,9 +7,11 @@ mod screens;
 mod session;
 mod support;
 mod theme;
+mod usb;
 mod widgets;
 
 fn main() -> eframe::Result {
+    heimdall_platform::init();
     let options = eframe::NativeOptions {
         viewport: eframe::egui::ViewportBuilder::default()
             .with_title("Heimdall")

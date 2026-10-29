@@ -252,6 +252,7 @@ Decisiones que este documento dejaba abiertas y que el código fija:
 | Argon2id del slot de recuperación | m = 64 MiB, t = 2, p = 4 |
 | Entrada del KDF de recuperación | Los 16 bytes de entropía, no el texto de las palabras. Mayúsculas, espacios o comas no importan |
 | Contenido en claro | `longitud (u32) ‖ postcard(version_contenido) ‖ postcard(Contenido) ‖ ceros` hasta múltiplo de 4 KiB. Se rechaza si el relleno no es todo ceros |
+| Versión del contenido | 2 desde la v0.3: agrega `accesos: [ {slot_id, nombre, fecha} ]` al final de `Contenido`. La versión 1 se sigue leyendo y se guarda como 2 |
 | Keyfile `.bifrost` | `"HMKF" ‖ vault_id (16 B) ‖ secreto (32 B)` = 52 B |
 | Slots de tipo desconocido | Se conservan intactos en guardados normales; al rotar la MK se descartan, porque no se pueden re-envolver |
 | Verificación antes de cambiar accesos | Toda operación sobre los slots (cambiar contraseña, agregar USB, rotar) comprueba primero la contraseña contra un slot existente, para que un error de tecleo nunca deje al usuario fuera |
@@ -520,6 +521,33 @@ Pendiente de la v0.2:
 - **Buscar** (Ctrl+F) y el menú `⌄` con la lista de pestañas cuando no caben.
 - **Ajustes *Line numbers* y *Spell check*:** se guardan en el modelo, pero aún no se muestran en Settings ni hacen nada.
 - **Bloquear al bloquear Windows o al suspender:** pasa a la v0.4, con el resto de §12.
+
+- **v0.3 — hecho, falta probarlo con un USB real.** Crate nuevo `crates/heimdall-platform` (§13). Probado con unidades simuladas (ver abajo).
+
+Decisiones tomadas al implementar la v0.3:
+- **`heimdall-platform`** usa `windows-sys`. Es el único crate con `unsafe` permitido (`deny`, no `forbid`), solo en el módulo de Windows y con una nota `SAFETY` en cada bloque.
+- **Qué cuenta como USB:** las unidades extraíbles, más las fijas conectadas por bus USB (los SSD externos se anuncian como fijos). Nunca la unidad del sistema. El nombre que se muestra es la etiqueta del volumen o, si no tiene, el nombre del dispositivo.
+- **El keyfile va en la raíz de la unidad**, como `<nombre de la vault>.bifrost`. Nunca se sobrescribe un keyfile existente (puede ser la única llave de otra vault): si el nombre está ocupado, se usa `-2`, `-3`… Después de escribirlo se relee para comprobarlo. Al abrir se busca cualquier `.bifrost` en la raíz de cada USB y se usa el que coincide con la vault.
+- **Detección de retiro (§8.3):** por ahora solo el método de respaldo, comprobado cada **1 s** (no 2 s) en un hilo aparte: el keyfile se vuelve a leer y su hint debe coincidir. El hilo no guarda el secreto, solo el hint. `WM_DEVICECHANGE` queda pendiente: `eframe` no expone los mensajes de la ventana.
+- **Al retirar el USB la vault se bloquea siempre**, aunque falle el guardado de emergencia (por ejemplo, si el `.heim` estaba en ese mismo USB). Es la excepción a la regla de la v0.2: la presencia es una garantía de seguridad. La pantalla de bloqueo dice si no se pudieron guardar los últimos cambios.
+- **Nombre y fecha de cada acceso** ("KINGSTON · Added Oct 27, 2026") se guardan cifrados en el contenido, que pasa a la **versión 2** (§5.3). La versión 1 se sigue leyendo. Los accesos creados antes de la v0.3 se muestran como "USB key", sin fecha.
+- **Los cambios de acceso se calculan sobre una copia de la vault en un hilo aparte** (Argon2id corre varias veces y congelaría la ventana). Si salen bien, la copia aporta los slots y la MK nuevos, y las notas siguen siendo las de la sesión. Se guarda de inmediato.
+- **El código de recuperación nuevo se guarda antes de mostrarse** (rotar, revocar, regenerar, subir de perfil). Así, si la app se cierra antes de confirmarlo, la vault queda en un estado coherente y se abre con la contraseña y el USB. Mientras el código está en pantalla no corre el bloqueo por inactividad (el retiro del USB sí bloquea).
+- **Si un guardado que cambia accesos falla**, el siguiente guardado (aunque sea el autoguardado) también reemplaza el `.bak`.
+- **Tras entrar con el código de recuperación se conserva el perfil.** En Hardened y Paranoid el asistente pide un USB y escribe un keyfile **nuevo**; los anteriores dejan de abrir las versiones nuevas.
+- **Subir de Basic sin ningún USB:** el diálogo *Change profile* lo explica y ofrece *Add USB key*. Después se vuelve a *Change profile*.
+- **Paranoid queda habilitado** (en §14 solo figuraba Reforzado). Funciona igual que Hardened, con sus propios predeterminados y Argon2id de 512 MiB. La exclusión de capturas sigue en la v0.4.
+- **Unlock en una vault Basic con USB** (bajó de Hardened) muestra la fila *Key* como opcional. Si el USB está, se usa; si no, basta la contraseña.
+- **Las contraseñas tecleadas se borran de la memoria de egui** al desbloquear y al cerrar cada diálogo, no solo al bloquear.
+- **Pruebas sin hardware:** en las compilaciones de depuración, cada carpeta de `HEIMDALL_FAKE_USB` (separadas por `;`) aparece como una unidad USB. Renombrarla equivale a retirar el USB. En la versión release esto no existe.
+- **Un keyfile revocado se queda en el USB** (Heimdall nunca borra archivos del USB). Ya no abre la vault y Unlock lo muestra como "This key was revoked". Un keyfile nuevo en esa unidad se llama `<nombre>-2.bifrost`.
+- **Add USB key preselecciona una unidad sin llave de esta vault** (una copia de respaldo en el mismo USB no sirve) y avisa si se elige una que ya tiene.
+- **Probado a mano el 2026-10-28 con unidades simuladas:** crear Hardened, retiro y reinserción, agregar llave, revocar la llave en uso (la presencia pasa a la otra), recuperación con código (el viejo ya no sirve), cambiar contraseña, rotar (espera a que estén todas las llaves), Hardened → Basic → Paranoid → Basic, Basic sin USB.
+
+Pendiente de la v0.3:
+- **Probar con un USB real**: detección, etiqueta, tamaño y retiro físico.
+- **`WM_DEVICECHANGE`** como detector principal del retiro.
+- *Hide window from screenshots* y *Lock when Windows locks or sleeps* (mockup Settings) siguen en la v0.4.
 
 ---
 

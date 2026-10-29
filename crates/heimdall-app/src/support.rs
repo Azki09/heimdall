@@ -36,7 +36,11 @@ pub fn error_message(e: &Error) -> String {
         Error::WrongPassword => "Wrong password.".into(),
         Error::WrongRecoveryCode => "That recovery code doesn't open this vault.".into(),
         Error::InvalidRecoveryCode => "That isn't a valid recovery code. Check each word.".into(),
-        Error::KeyfileRequired => "This vault needs its USB key. USB keys arrive in version 0.3.".into(),
+        Error::KeyfileRequired => "Connect the USB key for this vault.".into(),
+        Error::WrongKeyfile => "This USB key no longer opens the vault. It may have been revoked.".into(),
+        Error::KeyfileForOtherVault => "That USB key belongs to a different vault.".into(),
+        Error::MissingKeyfile(_) => "Connect every USB key you keep.".into(),
+        Error::NoPasswordSlotLeft => "That would leave no way to open the vault with your password.".into(),
         Error::BadMagic | Error::Malformed | Error::BadSlotLength => {
             "This file isn't a Heimdall vault, or it is damaged.".into()
         }

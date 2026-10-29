@@ -1675,12 +1675,13 @@ checksum = "2304e00983f87ffb38b55b444b5e3b60a884b5d30c0fca7d82fe33449bbe55ea"
 
 [[package]]
 name = "heimdall-app"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "arboard",
  "chrono",
  "eframe",
  "heimdall-core",
+ "heimdall-platform",
  "rfd",
  "uuid",
  "zeroize",
@@ -1704,6 +1705,13 @@ dependencies = [
  "thiserror 2.0.21",
  "uuid",
  "zeroize",
+]
+
+[[package]]
+name = "heimdall-platform"
+version = "0.1.0"
+dependencies = [
+ "windows-sys 0.59.0",
 ]
 
 [[package]]

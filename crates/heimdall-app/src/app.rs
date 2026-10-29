@@ -15,6 +15,7 @@ use crate::screens::welcome::Welcome;
 use crate::screens::wizard::Wizard;
 use crate::session::Session;
 use crate::support::{clock, ClipboardGuard, RecentVaults};
+use crate::usb::UsbKey;
 use crate::{chrome, theme};
 
 /// What a screen asks the app to do next.
@@ -23,12 +24,14 @@ pub enum Action {
     PickFile,
     Open(PathBuf),
     Create,
-    /// A vault was created, unlocked, or had its access reset.
+    /// A vault was created, unlocked, or had its access reset. `usb` is the
+    /// key it was opened with (or enrolled), if any.
     Opened {
         vault: Vault,
         path: PathBuf,
+        usb: Option<UsbKey>,
     },
-    /// Opened with the recovery code: a new password is mandatory (DESIGN Â§9 step 5).
+    /// Opened with the recovery code: a new password is mandatory (DESIGN §9 step 5).
     Recovered {
         vault: Vault,
         path: PathBuf,
@@ -43,6 +46,7 @@ pub enum LockReason {
     Manual,
     Inactivity(u32),
     Minimized,
+    UsbRemoved,
 }
 
 enum Screen {
@@ -50,7 +54,7 @@ enum Screen {
     Unlock(Box<Unlock>),
     Wizard(Box<Wizard>),
     Editor,
-    Settings(Settings),
+    Settings(Box<Settings>),
 }
 
 pub struct HeimdallApp {
@@ -91,24 +95,26 @@ impl HeimdallApp {
             }
             Action::Open(path) => self.screen = Screen::Unlock(Box::new(Unlock::new(path, None))),
             Action::Create => self.screen = Screen::Wizard(Box::new(Wizard::create())),
-            Action::Opened { vault, path } => self.opened(vault, path),
+            Action::Opened { vault, path, usb } => self.opened(ctx, vault, path, usb),
             Action::Recovered { vault, path } => {
                 self.screen = Screen::Wizard(Box::new(Wizard::reset(vault, path)))
             }
             Action::Lock(reason) => self.lock(ctx, reason),
-            Action::Settings => self.screen = Screen::Settings(Settings::default()),
+            Action::Settings => self.screen = Screen::Settings(Box::default()),
             Action::Notes => self.screen = Screen::Editor,
         }
     }
 
-    fn opened(&mut self, mut vault: Vault, path: PathBuf) {
+    fn opened(&mut self, ctx: &egui::Context, mut vault: Vault, path: PathBuf, usb: Option<UsbKey>) {
+        // The password fields' text and undo history live in egui's memory.
+        wipe_ui_memory(ctx);
         let purged = vault.content.purge_expired_trash(heimdall_core::content::now());
         if vault.content.security.remember_recent {
             self.recent.touch(&path);
         } else {
             self.recent.remove(&path);
         }
-        let mut session = Session::new(vault, path);
+        let mut session = Session::new(ctx, vault, path, usb);
         if purged > 0 {
             session.touch(None);
         }
@@ -119,19 +125,23 @@ impl HeimdallApp {
     }
 
     /// Saves pending changes, wipes the vault from memory and shows the
-    /// lock screen (DESIGN Â§9 step 3). If saving fails the vault stays open,
-    /// so no work is lost; the error is shown in the status bar.
+    /// lock screen (DESIGN §9 step 3). If saving fails the vault stays open,
+    /// so no work is lost; the error is shown in the status bar. The one
+    /// exception is a removed USB key: presence mode always locks (§8.3).
     fn lock(&mut self, ctx: &egui::Context, reason: LockReason) {
         let Some(session) = self.session.as_mut() else {
             return;
         };
-        if session.has_unsaved() && !session.save() {
+        let must_lock = matches!(reason, LockReason::UsbRemoved);
+        if session.has_unsaved() && !session.save() && !must_lock {
             self.screen = Screen::Editor;
             return;
         }
-        let saved_at = session
-            .last_saved
-            .map(|t| format!("Your changes were saved at {}.", clock(t)));
+        let saved_at = match (&session.save_error, session.last_saved) {
+            (Some(e), _) if must_lock => Some(format!("Your last changes couldn't be saved: {e}")),
+            (_, Some(t)) => Some(format!("Your changes were saved at {}.", clock(t))),
+            _ => None,
+        };
         let path = session.path.clone();
         self.session = None; // drops the Vault: MK and note text are zeroized
         self.clipboard.clear_now();
@@ -144,12 +154,22 @@ impl HeimdallApp {
                 format!("Locked after {} of inactivity", crate::support::duration_label(s))
             }
             LockReason::Minimized => "Locked when the window was minimized".to_owned(),
+            LockReason::UsbRemoved => "Locked because the USB key was removed".to_owned(),
         };
         self.screen = Screen::Unlock(Box::new(Unlock::new(path, Some(LockInfo { reason, saved_at }))));
     }
 
     fn auto_lock(&mut self, ctx: &egui::Context) -> Option<LockReason> {
-        let security = &self.session.as_ref()?.vault.content.security;
+        let session = self.session.as_ref()?;
+        if session.presence.as_ref().is_some_and(|p| p.removed()) {
+            return Some(LockReason::UsbRemoved);
+        }
+        // Not while a new recovery code is on screen or keys are being
+        // changed: locking then would lose the code (it is already saved).
+        if matches!(&self.screen, Screen::Settings(page) if page.holds_lock()) {
+            return None;
+        }
+        let security = &session.vault.content.security;
         if security.lock_on_minimize && ctx.input(|i| i.viewport().minimized == Some(true)) {
             return Some(LockReason::Minimized);
         }
@@ -158,7 +178,7 @@ impl HeimdallApp {
             .then_some(LockReason::Inactivity(secs))
     }
 
-    /// Clipboard auto-clear and CRLF conversion on copy (DESIGN Â§10.4, Â§11).
+    /// Clipboard auto-clear and CRLF conversion on copy (DESIGN §10.4, §11).
     fn handle_copies(&mut self, ctx: &egui::Context) {
         let Some(session) = &self.session else { return };
         let crlf = session.vault.content.editor.line_ending == LineEnding::Crlf;
