@@ -34,7 +34,7 @@ pub struct Unlock {
     job: Option<UnlockJob>,
     focus_pending: bool,
     /// Looks for this vault's key files while the screen is open.
-    keys: Option<Scan<Vec<UsbKey>>>,
+    keys: Option<Scan<usb::Lookup>>,
 }
 
 /// What the Key row says.
@@ -43,6 +43,8 @@ enum KeyState<'a> {
     Found(&'a UsbKey),
     /// A key file of this vault whose slot was revoked.
     NotEnrolled(&'a UsbKey),
+    /// No key of this vault, but a `.bifrost` file that can't be read.
+    Unreadable(&'a usb::KeyFile),
     Missing,
 }
 
@@ -55,7 +57,7 @@ impl Unlock {
             .as_ref()
             .ok()
             .filter(|l| l.has_keyfile_slots())
-            .map(|l| usb::key_scan(*l.vault_id()));
+            .map(|l| usb::lookup_scan(*l.vault_id()));
         Self {
             path,
             locked,
@@ -77,10 +79,16 @@ impl Unlock {
         let Some(found) = &scan.value else {
             return KeyState::Searching;
         };
-        if let Some(k) = found.iter().find(|k| locked.accepts_keyfile(&k.keyfile)) {
+        if let Some(k) = found.keys.iter().find(|k| locked.accepts_keyfile(&k.keyfile)) {
             return KeyState::Found(k);
         }
-        found.first().map_or(KeyState::Missing, KeyState::NotEnrolled)
+        if let Some(k) = found.keys.first() {
+            return KeyState::NotEnrolled(k);
+        }
+        found
+            .unreadable
+            .first()
+            .map_or(KeyState::Missing, KeyState::Unreadable)
     }
 
     fn requires_key(&self) -> bool {
@@ -151,7 +159,12 @@ impl Unlock {
         let info_h = if self.info.is_some() { 50.0 } else { 0.0 };
         let field_h = if self.use_recovery { 110.0 } else { 42.0 };
         let show_key = self.keys.is_some() && !self.use_recovery;
-        let key_h = if show_key { 82.0 } else { 0.0 };
+        let unreadable = show_key && matches!(self.key_state(), KeyState::Unreadable(_));
+        let key_h = match (show_key, unreadable) {
+            (false, _) => 0.0,
+            (true, false) => 82.0,
+            (true, true) => 122.0,
+        };
         screens::centered_column(
             ctx,
             340.0,
@@ -235,6 +248,14 @@ impl Unlock {
                 if show_key {
                     widgets::label(ui, "Key", 12.0, TEXT_MUTED);
                     key_row(ui, &self.key_state(), self.requires_key());
+                    if unreadable {
+                        ui.add_space(8.0);
+                        widgets::paragraph(
+                            ui,
+                            "It isn't a valid key: the drive may not have kept what was written. If no other key is around, use your recovery code.",
+                            340.0,
+                        );
+                    }
                     ui.add_space(28.0);
                 }
 
@@ -310,6 +331,10 @@ fn key_row(ui: &mut Ui, state: &KeyState<'_>, required: bool) {
         KeyState::NotEnrolled(k) => {
             label = k.label();
             (DANGER, "This key was revoked", label.as_str())
+        }
+        KeyState::Unreadable(f) => {
+            label = format!("{} on {}", f.file_name(), f.drive.letter());
+            (DANGER, "Damaged key file", label.as_str())
         }
         KeyState::Missing if required => (TRACK_OFF, "Insert your USB key", "Waiting…"),
         KeyState::Missing => (TRACK_OFF, "No USB key connected", "Optional"),

@@ -1,8 +1,11 @@
-//! Settings: Security, Access, Editor, Trash and About (Settings mockups).
+//! Settings: Security, Access, Editor, Shortcuts, Trash and About
+//! (Settings mockups).
 //! Access lives in its own module, `access.rs`.
 
 use eframe::egui::{self, pos2, vec2, Align2, CornerRadius, CursorIcon, Sense, Stroke, StrokeKind, Ui};
-use heimdall_core::content::{Font, LineEnding, Profile, SecuritySettings, TabInsert, TRASH_RETENTION_S};
+use heimdall_core::content::{
+    Font, LineEnding, Profile, SecuritySettings, SpellLanguage, TabInsert, TRASH_RETENTION_S,
+};
 use uuid::Uuid;
 
 use crate::app::Action;
@@ -19,6 +22,7 @@ enum Page {
     Security,
     Access,
     Editor,
+    Shortcuts,
     Trash,
     About,
 }
@@ -37,6 +41,14 @@ pub struct Settings {
 }
 
 impl Settings {
+    /// Opened from "All shortcuts" in the code mode tip.
+    pub fn shortcuts() -> Self {
+        Self {
+            page: Page::Shortcuts,
+            ..Default::default()
+        }
+    }
+
     /// See [`Access::holds_lock`].
     pub fn holds_lock(&self) -> bool {
         self.access.holds_lock()
@@ -46,8 +58,10 @@ impl Settings {
         let mut action = None;
         self.access.poll(ctx, s, recent);
         let locked_in = self.access.blocks_navigation();
+        // An open dropdown takes Escape first: it only closes the dropdown.
         if !locked_in
             && self.confirm.is_none()
+            && !ctx.memory(|m| m.any_popup_open())
             && ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape))
         {
             return Some(Action::Notes);
@@ -75,6 +89,7 @@ impl Settings {
                     (Page::Security, "Security"),
                     (Page::Access, "Access"),
                     (Page::Editor, "Editor"),
+                    (Page::Shortcuts, "Shortcuts"),
                     (Page::Trash, "Trash"),
                     (Page::About, "About"),
                 ] {
@@ -103,13 +118,14 @@ impl Settings {
                     .show(ui, |ui| {
                         ui.set_max_width(600.0);
                         if self.access.showing_code() {
-                            self.access.code_ui(ui);
+                            self.access.code_ui(ui, s);
                             return;
                         }
                         match self.page {
                             Page::Security => security(ui, s, recent, &mut self.access),
                             Page::Access => self.access.page(ui, s),
                             Page::Editor => editor(ui, s),
+                            Page::Shortcuts => shortcuts(ui),
                             Page::Trash => self.trash(ui, s),
                             Page::About => about(ui),
                         }
@@ -570,6 +586,39 @@ fn editor(ui: &mut Ui, s: &mut Session) {
     setting_row(ui, "Word wrap", None, |ui| {
         changed |= widgets::toggle(ui, &mut e.word_wrap).changed()
     });
+    setting_row(
+        ui,
+        "Line numbers",
+        Some(("Numbers in plain notes. Code mode always shows them.", TEXT_MUTED)),
+        |ui| changed |= widgets::toggle(ui, &mut e.line_numbers).changed(),
+    );
+    setting_row(
+        ui,
+        "Spell check",
+        Some((
+            "Underlines unknown words; right-click one for suggestions. It never changes your text by itself. Off in code mode.",
+            TEXT_MUTED,
+        )),
+        |ui| changed |= widgets::toggle(ui, &mut e.spell_check).changed(),
+    );
+    if e.spell_check {
+        setting_row(
+            ui,
+            "Spell check language",
+            Some(("Dictionaries are built in; nothing is downloaded.", TEXT_MUTED)),
+            |ui| {
+                let opts = [
+                    (SpellLanguage::English, "English".to_owned()),
+                    (SpellLanguage::Spanish, "Spanish".to_owned()),
+                    (SpellLanguage::EnglishAndSpanish, "English + Spanish".to_owned()),
+                ];
+                changed |= combo(ui, "spell_language", &mut e.spell_language, &opts);
+            },
+        );
+    }
+    if e.spell_check && !s.vault.content.dictionary.is_empty() {
+        personal_dictionary(ui, s);
+    }
     setting_row(ui, "Status bar", None, |ui| {
         changed |= widgets::toggle(ui, &mut e.status_bar).changed()
     });
@@ -588,12 +637,192 @@ fn editor(ui: &mut Ui, s: &mut Session) {
         Some(("Return to the tab and cursor position you left.", TEXT_MUTED)),
         |ui| changed |= widgets::toggle(ui, &mut e.reopen_tabs).changed(),
     );
+    setting_row(
+        ui,
+        "Code mode tip on new tabs",
+        Some((
+            "Reminds you that Ctrl+Shift+M turns a tab into a code editor.",
+            TEXT_MUTED,
+        )),
+        |ui| changed |= widgets::toggle(ui, &mut e.code_tip).changed(),
+    );
     ui.add_space(12.0);
     widgets::label(ui, "Zoom: Ctrl + / Ctrl − / Ctrl 0.", 12.0, TEXT_FAINT);
 
     if changed {
         s.vault.content.editor = e;
         s.touch(None);
+    }
+}
+
+/// The words added with "Add to dictionary"; stored encrypted in the vault.
+fn personal_dictionary(ui: &mut Ui, s: &mut Session) {
+    ui.add_space(14.0);
+    widgets::label(ui, "Personal dictionary", 14.0, TEXT);
+    ui.add_space(4.0);
+    widgets::label(
+        ui,
+        "Saved inside this vault, encrypted. Click × to remove a word.",
+        12.0,
+        TEXT_MUTED,
+    );
+    ui.add_space(10.0);
+    let mut remove = None;
+    let width = ui.available_width();
+    ui.horizontal_wrapped(|ui| {
+        ui.set_max_width(width.min(600.0));
+        ui.spacing_mut().item_spacing = vec2(6.0, 6.0);
+        for (i, word) in s.vault.content.dictionary.iter().enumerate() {
+            let galley = ui
+                .painter()
+                .layout_no_wrap(word.clone(), crate::theme::ui(12.0), TEXT_BODY);
+            let size = vec2(galley.size().x + 12.0 + 22.0, 26.0);
+            let (rect, _) = ui.allocate_exact_size(size, Sense::hover());
+            let x_rect =
+                egui::Rect::from_center_size(pos2(rect.right() - 13.0, rect.center().y), vec2(18.0, 18.0));
+            let x = ui.interact(x_rect, egui::Id::new(("dict_remove", i)), Sense::click());
+            let painter = ui.painter();
+            painter.rect(
+                rect,
+                CornerRadius::same(13),
+                SURFACE,
+                Stroke::new(1.0_f32, BORDER),
+                StrokeKind::Inside,
+            );
+            painter.galley(
+                pos2(rect.left() + 12.0, rect.center().y - galley.size().y / 2.0),
+                galley,
+                TEXT_BODY,
+            );
+            if x.hovered() {
+                painter.circle_filled(x_rect.center(), 8.0, NAV_ACTIVE);
+                ui.ctx().set_cursor_icon(CursorIcon::PointingHand);
+            }
+            widgets::icon_close(
+                painter,
+                x_rect.center(),
+                7.0,
+                if x.hovered() { TEXT } else { TEXT_MUTED },
+            );
+            if x.on_hover_text("Remove").clicked() {
+                remove = Some(i);
+            }
+        }
+    });
+    ui.add_space(14.0);
+    let y = ui.cursor().top();
+    ui.painter().hline(
+        ui.min_rect().left()..=ui.min_rect().left() + width,
+        y,
+        Stroke::new(1.0_f32, DIVIDER),
+    );
+    ui.add_space(1.0);
+    if let Some(i) = remove {
+        let mut word = s.vault.content.dictionary.remove(i);
+        zeroize::Zeroize::zeroize(&mut word);
+        s.touch(None);
+    }
+}
+
+/// Keyboard shortcuts (Settings · Shortcuts mockup). Read-only.
+fn shortcuts(ui: &mut Ui) {
+    widgets::heading(ui, "Keyboard shortcuts");
+    ui.add_space(6.0);
+    /// What a row does, and its key combinations.
+    type Row = (&'static str, &'static [&'static [&'static str]]);
+    let groups: [(&str, &[Row]); 4] = [
+        (
+            "Tabs",
+            &[
+                ("New tab", &[&["Ctrl", "T"]]),
+                ("Close tab · moves the note to Trash", &[&["Ctrl", "W"]]),
+                ("Reopen closed tab", &[&["Ctrl", "Shift", "T"]]),
+                (
+                    "Next / previous tab",
+                    &[&["Ctrl", "Tab"], &["Ctrl", "Shift", "Tab"]],
+                ),
+                (
+                    "Go to tab 1–8 / the last tab",
+                    &[&["Ctrl", "1…8"], &["Ctrl", "9"]],
+                ),
+            ],
+        ),
+        (
+            "Find",
+            &[
+                ("Find in this note", &[&["Ctrl", "F"]]),
+                ("Next / previous match", &[&["F3"], &["Shift", "F3"]]),
+                ("Find in all notes", &[&["Ctrl", "Shift", "F"]]),
+            ],
+        ),
+        (
+            "View",
+            &[
+                ("Code mode for this tab", &[&["Ctrl", "Shift", "M"]]),
+                ("Word wrap for this tab", &[&["Alt", "Z"]]),
+                (
+                    "Zoom in / out / reset",
+                    &[&["Ctrl", "+"], &["Ctrl", "−"], &["Ctrl", "0"]],
+                ),
+            ],
+        ),
+        (
+            "Vault",
+            &[
+                ("Save all notes", &[&["Ctrl", "S"]]),
+                ("Lock now", &[&["Ctrl", "L"]]),
+                ("Settings", &[&["Ctrl", ","]]),
+            ],
+        ),
+    ];
+    for (title, rows) in groups {
+        ui.add_space(14.0);
+        widgets::label(ui, title, 12.0, TEXT_MUTED);
+        ui.add_space(2.0);
+        for (i, (label, combos)) in rows.iter().enumerate() {
+            let (rect, _) = ui.allocate_exact_size(vec2(600.0, 36.0), Sense::hover());
+            if i + 1 < rows.len() {
+                ui.painter()
+                    .hline(rect.x_range(), rect.bottom() - 0.5, Stroke::new(1.0_f32, DIVIDER));
+            }
+            let (main, note) = label
+                .split_once(" · ")
+                .map_or((*label, None), |(a, b)| (a, Some(b)));
+            let galley = ui
+                .painter()
+                .layout_no_wrap(main.to_owned(), crate::theme::ui(13.0), TEXT);
+            let w = galley.size().x;
+            ui.painter().galley(
+                pos2(rect.left(), rect.center().y - galley.size().y / 2.0),
+                galley,
+                TEXT,
+            );
+            if let Some(note) = note {
+                ui.painter().text(
+                    pos2(rect.left() + w, rect.center().y),
+                    Align2::LEFT_CENTER,
+                    format!(" · {note}"),
+                    crate::theme::ui(13.0),
+                    TEXT_MUTED,
+                );
+            }
+            let mut child = ui.new_child(
+                egui::UiBuilder::new()
+                    .max_rect(rect)
+                    .layout(egui::Layout::right_to_left(egui::Align::Center)),
+            );
+            child.spacing_mut().item_spacing.x = 4.0;
+            for (k, keys) in combos.iter().enumerate().rev() {
+                // Right to left: draw each combination's keys reversed.
+                let reversed: Vec<&str> = keys.iter().rev().copied().collect();
+                for key in reversed {
+                    widgets::keys(&mut child, &[key]);
+                }
+                if k > 0 {
+                    widgets::label(&mut child, " / ", 12.0, TEXT_FAINT);
+                }
+            }
+        }
     }
 }
 
@@ -653,6 +882,9 @@ fn about(ui: &mut Ui) {
         ("arboard", "MIT / Apache-2.0"),
         ("zxcvbn", "MIT"),
         ("chrono", "MIT / Apache-2.0"),
+        ("spellbook", "MPL-2.0"),
+        ("en_US dictionary (SCOWL)", "Permissive"),
+        ("es_MX dictionary", "GPL-3.0 / LGPL-3.0 / MPL-1.1"),
         ("Inter", "OFL-1.1"),
         ("JetBrains Mono", "OFL-1.1"),
     ];

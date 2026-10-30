@@ -10,8 +10,10 @@ use crate::crypto::TAG_LEN;
 use crate::error::{Error, Result};
 use crate::format::SlotId;
 
-/// 2 added [`Content::access`] (v0.3). Version 1 is still read.
-pub const CONTENT_VERSION: u16 = 2;
+/// 2 added [`Content::access`] (v0.3); 3 added code mode per note,
+/// [`EditorSettings::code_tip`], the spell check language and the personal
+/// dictionary. Versions 1 and 2 are still read.
+pub const CONTENT_VERSION: u16 = 3;
 /// Plaintext is padded to a multiple of this (DESIGN §5.3).
 pub const PAD_BLOCK: usize = 4096;
 /// Notes stay in the trash this long before being purged (DESIGN §10.3).
@@ -102,6 +104,15 @@ pub enum LineEnding {
     Lf,
 }
 
+/// Dictionaries the spell checker uses (DESIGN §10.4). A word is correct
+/// if any of them accepts it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum SpellLanguage {
+    English,
+    Spanish,
+    EnglishAndSpanish,
+}
+
 /// Editor settings (DESIGN §10.4).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct EditorSettings {
@@ -113,10 +124,13 @@ pub struct EditorSettings {
     pub line_numbers: bool,
     pub status_bar: bool,
     pub spell_check: bool,
+    pub spell_language: SpellLanguage,
     pub autosave: bool,
     pub reopen_tabs: bool,
     /// Ctrl+ / Ctrl- / Ctrl+0; not a setting, but remembered (§10.4).
     pub zoom_percent: u16,
+    /// Show the code mode tip on every new tab (§10.6).
+    pub code_tip: bool,
 }
 
 impl Default for EditorSettings {
@@ -130,11 +144,20 @@ impl Default for EditorSettings {
             line_numbers: false,
             status_bar: true,
             spell_check: false,
+            spell_language: SpellLanguage::EnglishAndSpanish,
             autosave: true,
             reopen_tabs: true,
             zoom_percent: 100,
+            code_tip: true,
         }
     }
+}
+
+/// A tab in code mode (DESIGN §10.6): line numbers, syntax colors, minimap.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CodeMode {
+    /// Language id ("rust", "powershell"...). Empty = detect it from the title.
+    pub language: String,
 }
 
 #[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -149,6 +172,11 @@ pub struct Note {
     pub cursor: u64,
     /// Set only while the note is in the trash.
     pub deleted_at: Option<Timestamp>,
+    /// `Some` = the tab is in code mode (Ctrl+Shift+M).
+    pub code: Option<CodeMode>,
+    /// Word wrap for this tab (Alt+Z). `None` = the global setting, or off
+    /// in code mode.
+    pub wrap: Option<bool>,
 }
 
 impl Note {
@@ -161,6 +189,8 @@ impl Note {
             modified: now,
             cursor: 0,
             deleted_at: None,
+            code: None,
+            wrap: None,
         }
     }
 
@@ -217,27 +247,140 @@ pub struct Content {
     pub trash: Vec<Note>,
     /// Labels for the key slots. Slots from before v0.3 have none.
     pub access: Vec<AccessLabel>,
+    /// Words added with "Add to dictionary"; the spell checker accepts them
+    /// in every language (§10.4).
+    pub dictionary: Vec<String>,
 }
 
-/// Content version 1 (v0.1, v0.2): no access labels.
-#[derive(Serialize, Deserialize)]
-struct ContentV1 {
-    security: SecuritySettings,
-    editor: EditorSettings,
-    notes: Vec<Note>,
-    active_note: Option<Uuid>,
-    trash: Vec<Note>,
+impl Drop for Content {
+    fn drop(&mut self) {
+        for word in &mut self.dictionary {
+            word.zeroize();
+        }
+    }
 }
 
-impl From<ContentV1> for Content {
-    fn from(v1: ContentV1) -> Self {
-        Self {
-            security: v1.security,
-            editor: v1.editor,
-            notes: v1.notes,
-            active_note: v1.active_note,
-            trash: v1.trash,
-            access: Vec::new(),
+/// Layouts of versions 1 and 2, still read (DESIGN §5.3).
+mod legacy {
+    use super::*;
+
+    /// A note before version 3: no code mode, no wrap override.
+    #[derive(Serialize, Deserialize)]
+    pub(super) struct NoteV1 {
+        pub id: Uuid,
+        pub title: String,
+        pub body: String,
+        pub created: Timestamp,
+        pub modified: Timestamp,
+        pub cursor: u64,
+        pub deleted_at: Option<Timestamp>,
+    }
+
+    impl Drop for NoteV1 {
+        fn drop(&mut self) {
+            self.title.zeroize();
+            self.body.zeroize();
+        }
+    }
+
+    impl From<NoteV1> for Note {
+        fn from(mut n: NoteV1) -> Self {
+            Self {
+                id: n.id,
+                title: std::mem::take(&mut n.title),
+                body: std::mem::take(&mut n.body),
+                created: n.created,
+                modified: n.modified,
+                cursor: n.cursor,
+                deleted_at: n.deleted_at,
+                code: None,
+                wrap: None,
+            }
+        }
+    }
+
+    /// Editor settings before version 3: no `spell_language`, no `code_tip`.
+    #[derive(Serialize, Deserialize)]
+    pub(super) struct EditorSettingsV1 {
+        pub font: Font,
+        pub font_size: u8,
+        pub tab_inserts: TabInsert,
+        pub line_ending: LineEnding,
+        pub word_wrap: bool,
+        pub line_numbers: bool,
+        pub status_bar: bool,
+        pub spell_check: bool,
+        pub autosave: bool,
+        pub reopen_tabs: bool,
+        pub zoom_percent: u16,
+    }
+
+    impl From<EditorSettingsV1> for EditorSettings {
+        fn from(e: EditorSettingsV1) -> Self {
+            Self {
+                font: e.font,
+                font_size: e.font_size,
+                tab_inserts: e.tab_inserts,
+                line_ending: e.line_ending,
+                word_wrap: e.word_wrap,
+                line_numbers: e.line_numbers,
+                status_bar: e.status_bar,
+                spell_check: e.spell_check,
+                spell_language: SpellLanguage::EnglishAndSpanish,
+                autosave: e.autosave,
+                reopen_tabs: e.reopen_tabs,
+                zoom_percent: e.zoom_percent,
+                code_tip: true,
+            }
+        }
+    }
+
+    /// Version 1 (v0.1, v0.2): no access labels.
+    #[derive(Serialize, Deserialize)]
+    pub(super) struct ContentV1 {
+        pub security: SecuritySettings,
+        pub editor: EditorSettingsV1,
+        pub notes: Vec<NoteV1>,
+        pub active_note: Option<Uuid>,
+        pub trash: Vec<NoteV1>,
+    }
+
+    /// Version 2 (v0.3).
+    #[derive(Serialize, Deserialize)]
+    pub(super) struct ContentV2 {
+        pub security: SecuritySettings,
+        pub editor: EditorSettingsV1,
+        pub notes: Vec<NoteV1>,
+        pub active_note: Option<Uuid>,
+        pub trash: Vec<NoteV1>,
+        pub access: Vec<AccessLabel>,
+    }
+
+    impl From<ContentV1> for Content {
+        fn from(v1: ContentV1) -> Self {
+            ContentV2 {
+                security: v1.security,
+                editor: v1.editor,
+                notes: v1.notes,
+                active_note: v1.active_note,
+                trash: v1.trash,
+                access: Vec::new(),
+            }
+            .into()
+        }
+    }
+
+    impl From<ContentV2> for Content {
+        fn from(v2: ContentV2) -> Self {
+            Self {
+                security: v2.security,
+                editor: v2.editor.into(),
+                notes: v2.notes.into_iter().map(Note::from).collect(),
+                active_note: v2.active_note,
+                trash: v2.trash.into_iter().map(Note::from).collect(),
+                access: v2.access,
+                dictionary: Vec::new(),
+            }
         }
     }
 }
@@ -253,7 +396,19 @@ impl Content {
             notes: vec![note],
             trash: Vec::new(),
             access: Vec::new(),
+            dictionary: Vec::new(),
         }
+    }
+
+    /// "Add to dictionary": the spell checker accepts `word` from now on.
+    /// Returns false if it was already there.
+    pub fn add_to_dictionary(&mut self, word: &str) -> bool {
+        let word = word.trim();
+        if word.is_empty() || self.dictionary.iter().any(|w| w == word) {
+            return false;
+        }
+        self.dictionary.push(word.to_owned());
+        true
     }
 
     pub fn label(&self, slot: SlotId) -> Option<&AccessLabel> {
@@ -321,6 +476,12 @@ impl Content {
         true
     }
 
+    /// Ctrl+Shift+T: restores the most recently closed note, if any.
+    pub fn reopen_last_closed(&mut self) -> Option<Uuid> {
+        let id = self.trash.iter().max_by_key(|n| n.deleted_at)?.id;
+        self.restore_note(id).then_some(id)
+    }
+
     pub fn delete_from_trash(&mut self, id: Uuid) -> bool {
         let before = self.trash.len();
         self.trash.retain(|n| n.id != id);
@@ -372,7 +533,8 @@ impl Content {
         }
         let (version, rest) = postcard::take_from_bytes::<u16>(body).map_err(|_| Error::BadContent)?;
         let (content, rest) = match version {
-            1 => postcard::take_from_bytes::<ContentV1>(rest).map(|(c, r)| (Content::from(c), r)),
+            1 => postcard::take_from_bytes::<legacy::ContentV1>(rest).map(|(c, r)| (Content::from(c), r)),
+            2 => postcard::take_from_bytes::<legacy::ContentV2>(rest).map(|(c, r)| (Content::from(c), r)),
             CONTENT_VERSION => postcard::take_from_bytes::<Content>(rest),
             other => return Err(Error::UnsupportedContentVersion(other)),
         }
@@ -398,9 +560,60 @@ mod tests {
         c
     }
 
+    /// `sample()` with code mode in use (version 3).
+    fn sample_v3() -> Content {
+        let mut c = sample();
+        c.notes[1].body = "fn main() {}".into();
+        c.notes[1].code = Some(CodeMode {
+            language: "rust".into(),
+        });
+        c.notes[0].wrap = Some(false);
+        c.editor.code_tip = false;
+        c.editor.spell_language = SpellLanguage::Spanish;
+        c.add_to_dictionary("Heimdall");
+        c
+    }
+
+    fn padded(version: u16, inner: &[u8]) -> Vec<u8> {
+        let mut body = postcard::to_allocvec(&version).unwrap();
+        body.extend_from_slice(inner);
+        let mut plain = (body.len() as u32).to_le_bytes().to_vec();
+        plain.extend_from_slice(&body);
+        plain.resize(PAD_BLOCK, 0);
+        plain
+    }
+
+    fn old_note(n: &Note) -> legacy::NoteV1 {
+        legacy::NoteV1 {
+            id: n.id,
+            title: n.title.clone(),
+            body: n.body.clone(),
+            created: n.created,
+            modified: n.modified,
+            cursor: n.cursor,
+            deleted_at: n.deleted_at,
+        }
+    }
+
+    fn old_editor(e: &EditorSettings) -> legacy::EditorSettingsV1 {
+        legacy::EditorSettingsV1 {
+            font: e.font,
+            font_size: e.font_size,
+            tab_inserts: e.tab_inserts,
+            line_ending: e.line_ending,
+            word_wrap: e.word_wrap,
+            line_numbers: e.line_numbers,
+            status_bar: e.status_bar,
+            spell_check: e.spell_check,
+            autosave: e.autosave,
+            reopen_tabs: e.reopen_tabs,
+            zoom_percent: e.zoom_percent,
+        }
+    }
+
     #[test]
     fn padded_roundtrip() {
-        let c = sample();
+        let c = sample_v3();
         let plain = c.to_padded_plaintext().unwrap();
         assert_eq!(plain.len() % PAD_BLOCK, 0);
         assert!(plain.capacity() >= plain.len() + TAG_LEN);
@@ -430,10 +643,10 @@ mod tests {
         ));
 
         let mut plain = c.to_padded_plaintext().unwrap().to_vec();
-        plain[4] = 3; // version varint
+        plain[4] = 4; // version varint
         assert!(matches!(
             Content::from_padded_plaintext(&plain),
-            Err(Error::UnsupportedContentVersion(3))
+            Err(Error::UnsupportedContentVersion(4))
         ));
 
         assert!(Content::from_padded_plaintext(&[0; 10]).is_err());
@@ -443,18 +656,61 @@ mod tests {
     #[test]
     fn reads_version_1() {
         let c = sample();
-        let v1 = ContentV1 {
+        let v1 = legacy::ContentV1 {
             security: c.security.clone(),
-            editor: c.editor.clone(),
-            notes: c.notes.clone(),
+            editor: old_editor(&c.editor),
+            notes: c.notes.iter().map(old_note).collect(),
             active_note: c.active_note,
-            trash: c.trash.clone(),
+            trash: c.trash.iter().map(old_note).collect(),
         };
-        let mut body = postcard::to_allocvec(&1u16).unwrap();
-        body.extend_from_slice(&postcard::to_allocvec(&v1).unwrap());
-        let mut plain = (body.len() as u32).to_le_bytes().to_vec();
-        plain.extend_from_slice(&body);
-        plain.resize(PAD_BLOCK, 0);
+        let plain = padded(1, &postcard::to_allocvec(&v1).unwrap());
+        assert_eq!(Content::from_padded_plaintext(&plain).unwrap(), c);
+    }
+
+    /// A vault saved by v0.3 opens with every tab in plain text and the
+    /// code mode tip on; saved again, it becomes version 3.
+    #[test]
+    fn reads_version_2() {
+        let mut c = sample();
+        c.set_label(SlotId([7; 8]), "KINGSTON", 5);
+        c.close_note(c.notes[0].id, 9);
+        let v2 = legacy::ContentV2 {
+            security: c.security.clone(),
+            editor: old_editor(&c.editor),
+            notes: c.notes.iter().map(old_note).collect(),
+            active_note: c.active_note,
+            trash: c.trash.iter().map(old_note).collect(),
+            access: c.access.clone(),
+        };
+        let plain = padded(2, &postcard::to_allocvec(&v2).unwrap());
+        let read = Content::from_padded_plaintext(&plain).unwrap();
+        assert_eq!(read, c);
+        assert!(read.editor.code_tip);
+        assert_eq!(read.editor.spell_language, SpellLanguage::EnglishAndSpanish);
+        assert!(read.dictionary.is_empty());
+        assert!(read
+            .notes
+            .iter()
+            .chain(&read.trash)
+            .all(|n| n.code.is_none() && n.wrap.is_none()));
+
+        let again = read.to_padded_plaintext().unwrap();
+        assert_eq!(
+            postcard::take_from_bytes::<u16>(&again[4..]).unwrap().0,
+            CONTENT_VERSION
+        );
+        assert_eq!(Content::from_padded_plaintext(&again).unwrap(), c);
+    }
+
+    #[test]
+    fn personal_dictionary() {
+        let mut c = sample();
+        assert!(c.add_to_dictionary(" Heimdall "));
+        assert!(!c.add_to_dictionary("Heimdall"));
+        assert!(!c.add_to_dictionary("  "));
+        assert!(c.add_to_dictionary("Bifrost"));
+        assert_eq!(c.dictionary, ["Heimdall", "Bifrost"]);
+        let plain = c.to_padded_plaintext().unwrap();
         assert_eq!(Content::from_padded_plaintext(&plain).unwrap(), c);
     }
 
@@ -519,6 +775,26 @@ mod tests {
         assert_eq!(c.purge_expired_trash(100 + TRASH_RETENTION_S - 1), 0);
         assert_eq!(c.purge_expired_trash(100 + TRASH_RETENTION_S), 1);
         assert!(c.trash.is_empty());
+    }
+
+    #[test]
+    fn reopen_last_closed_restores_the_newest() {
+        let mut c = Content::new(Profile::Basic, 0);
+        let a = c.notes[0].id;
+        let b = c.new_note(0);
+        c.notes[1].code = Some(CodeMode {
+            language: String::new(),
+        });
+        for n in &mut c.notes {
+            n.body = "x".into();
+        }
+        c.close_note(a, 10);
+        c.close_note(b, 20);
+        assert_eq!(c.reopen_last_closed(), Some(b));
+        assert_eq!(c.active_note, Some(b));
+        assert!(c.note(b).unwrap().code.is_some());
+        assert_eq!(c.reopen_last_closed(), Some(a));
+        assert_eq!(c.reopen_last_closed(), None);
     }
 
     #[test]

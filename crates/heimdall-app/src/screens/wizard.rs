@@ -10,7 +10,7 @@ use heimdall_core::{KdfParams, Keyfile, Profile, RecoveryCode, SecretString, Vau
 
 use crate::app::Action;
 use crate::chrome;
-use crate::screens::keys::{self, CodeCheck};
+use crate::screens::keys::{self, CodeActions, CodeCheck};
 use crate::support::{error_message, Job};
 use crate::theme::*;
 use crate::usb::{self, Drive, Scan, UsbKey};
@@ -62,6 +62,7 @@ pub struct Wizard {
     code: Option<RecoveryCode>,
     job: Option<KeysJob>,
     check: CodeCheck,
+    code_actions: CodeActions,
     drives: Scan<Vec<Drive>>,
     drive: Option<PathBuf>,
     /// The key file written to the drive. Deleted again if the wizard is
@@ -109,6 +110,7 @@ impl Wizard {
             code: None,
             job: None,
             check: CodeCheck::new(),
+            code_actions: CodeActions::default(),
             drives: usb::drive_scan(),
             drive: None,
             usb: None,
@@ -209,15 +211,17 @@ impl Wizard {
             .show(ctx, |ui| self.steps_ui(ui));
 
         let mut action = None;
+        // The 460 px column keeps 72 px margins, narrowed in a small window.
+        let side = ((ctx.screen_rect().width() - 240.0 - 460.0) / 2.0).clamp(24.0, 72.0);
         egui::CentralPanel::default()
             .frame(egui::Frame::NONE.fill(BG).inner_margin(egui::Margin {
-                left: 72,
-                right: 72,
+                left: side as i8,
+                right: side as i8,
                 top: 56,
                 bottom: 40,
             }))
             .show(ctx, |ui| {
-                let divider_x = ui.max_rect().left() - 72.0;
+                let divider_x = ui.max_rect().left() - side;
                 ui.painter().vline(
                     divider_x,
                     ui.max_rect().y_range().expand(96.0),
@@ -225,16 +229,26 @@ impl Wizard {
                 );
                 ui.with_layout(egui::Layout::bottom_up(egui::Align::Min), |ui| {
                     action = self.buttons_ui(ui);
+                    ui.add_space(16.0);
                     ui.with_layout(egui::Layout::top_down(egui::Align::Min), |ui| {
-                        ui.set_max_width(460.0);
-                        match self.step {
-                            Step::Name => self.name_ui(ui),
-                            Step::Profile => self.profile_ui(ui),
-                            Step::Password => self.password_ui(ui),
-                            Step::UsbKey => self.usb_ui(ui),
-                            Step::Recovery => self.recovery_ui(ui),
-                            Step::Confirm => self.confirm_ui(ui),
-                        }
+                        // A short window scrolls the step instead of drawing it
+                        // over the buttons. Each step starts at the top. The bar
+                        // takes its own room instead of floating over the fields.
+                        ui.spacing_mut().scroll = egui::style::ScrollStyle::solid();
+                        egui::ScrollArea::vertical()
+                            .id_salt(self.step.label())
+                            .auto_shrink([false, false])
+                            .show(ui, |ui| {
+                                ui.set_max_width(460.0);
+                                match self.step {
+                                    Step::Name => self.name_ui(ui),
+                                    Step::Profile => self.profile_ui(ui),
+                                    Step::Password => self.password_ui(ui),
+                                    Step::UsbKey => self.usb_ui(ui),
+                                    Step::Recovery => self.recovery_ui(ui),
+                                    Step::Confirm => self.confirm_ui(ui),
+                                }
+                            });
                     });
                 });
             });
@@ -722,13 +736,18 @@ impl Wizard {
         ui.add_space(2.0);
         widgets::paragraph(
             ui,
-            "If you forget your password, these 12 words are the only way back in. Write them on paper.",
+            "If you forget your password, these 12 words are the only way back in. Write them on paper, or print them.",
             460.0,
         );
         ui.add_space(24.0);
+        let vault = crate::support::file_name(&self.target_path());
+        let clear_after =
+            heimdall_core::content::SecuritySettings::defaults_for(self.profile()).clipboard_clear_s;
         let Some(code) = &self.code else { return };
         keys::code_grid(ui, code, 460.0);
-        ui.add_space(20.0);
+        ui.add_space(14.0);
+        self.code_actions.ui(ui, code, &vault, clear_after);
+        ui.add_space(16.0);
         keys::code_notes(ui);
     }
 
@@ -743,6 +762,22 @@ impl Wizard {
         ui.add_space(24.0);
         let Some(code) = &self.code else { return };
         self.check.ui(ui, code, 460.0);
+
+        // Hardened and Paranoid don't remember recent vaults (§6.1): the
+        // vault won't be on the Welcome screen, so say where it is.
+        if let Mode::Create { profile, .. } = &self.mode {
+            if !heimdall_core::content::SecuritySettings::defaults_for(*profile).remember_recent {
+                ui.add_space(20.0);
+                widgets::paragraph(
+                    ui,
+                    &format!(
+                        "{profile:?} vaults aren't listed under Recent vaults. To open this one later, use Open vault… and choose {}.",
+                        display_path(&self.target_path())
+                    ),
+                    460.0,
+                );
+            }
+        }
     }
 }
 

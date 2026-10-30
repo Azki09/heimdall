@@ -20,6 +20,7 @@ zxcvbn = "2"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 zeroize = "1.8"
 uuid = "1"
+spellbook = "0.4"
 
 [lints]
 workspace = true

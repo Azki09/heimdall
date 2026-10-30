@@ -274,6 +274,65 @@ pub fn toggle(ui: &mut Ui, on: &mut bool) -> Response {
     response
 }
 
+/// A 14 px checkbox with its label; the label is clickable too.
+pub fn checkbox(ui: &mut Ui, on: &mut bool, text: &str) -> Response {
+    let galley = ui
+        .painter()
+        .layout_no_wrap(text.to_owned(), ui_font(12.0), Color32::PLACEHOLDER);
+    let (rect, mut response) = ui.allocate_exact_size(vec2(22.0 + galley.size().x, 18.0), Sense::click());
+    if response.clicked() {
+        *on = !*on;
+        response.mark_changed();
+    }
+    let hovered = response.hovered();
+    let boxr = Rect::from_center_size(pos2(rect.left() + 7.0, rect.center().y), vec2(14.0, 14.0));
+    let painter = ui.painter();
+    painter.rect(
+        boxr,
+        CornerRadius::same(3),
+        if *on { TEXT_BODY } else { SURFACE },
+        Stroke::new(1.0_f32, if hovered { ICON } else { BORDER_FOCUS }),
+        StrokeKind::Inside,
+    );
+    if *on {
+        icon_check(painter, boxr.center(), 10.0, BG);
+    }
+    painter.galley(
+        pos2(rect.left() + 22.0, rect.center().y - galley.size().y / 2.0),
+        galley,
+        if hovered { TEXT } else { TEXT_MUTED },
+    );
+    if hovered {
+        ui.ctx().set_cursor_icon(CursorIcon::PointingHand);
+    }
+    response
+}
+
+/// Keyboard keys drawn as small chips: `keys(ui, &["Ctrl", "Shift", "M"])`.
+pub fn keys(ui: &mut Ui, keys: &[&str]) {
+    ui.scope(|ui| {
+        ui.spacing_mut().item_spacing.x = 4.0;
+        for key in keys {
+            let galley = ui
+                .painter()
+                .layout_no_wrap((*key).to_owned(), mono(11.0), TEXT_BODY);
+            let (rect, _) = ui.allocate_exact_size(vec2(galley.size().x + 14.0, 20.0), Sense::hover());
+            let painter = ui.painter();
+            painter.rect_filled(rect, CornerRadius::same(4), Color32::from_gray(0x3A));
+            painter.rect_filled(
+                Rect::from_min_max(rect.min + vec2(1.0, 1.0), rect.max - vec2(1.0, 2.0)),
+                CornerRadius::same(3),
+                SURFACE,
+            );
+            painter.galley(
+                rect.center() - vec2(0.0, 1.0) - galley.size() / 2.0,
+                galley,
+                TEXT_BODY,
+            );
+        }
+    });
+}
+
 /// A settings row: title + description on the left, a control on the right,
 /// divider underneath (Settings mockups).
 pub fn setting_row(
@@ -400,6 +459,70 @@ pub fn icon_sheet(painter: &Painter, center: Pos2, color: Color32) {
     ));
     painter.line_segment([p(6.0, 8.0), p(11.0, 8.0)], s);
     painter.line_segment([p(6.0, 11.0), p(11.0, 11.0)], s);
+}
+
+/// `</>`: a tab in code mode.
+pub fn icon_code(painter: &Painter, center: Pos2, size: f32, color: Color32) {
+    let p = scaled(center, size, 12.0);
+    let s = Stroke::new(1.3_f32, color);
+    painter.add(egui::Shape::line(vec![p(4.0, 3.0), p(1.0, 6.0), p(4.0, 9.0)], s));
+    painter.add(egui::Shape::line(vec![p(8.0, 3.0), p(11.0, 6.0), p(8.0, 9.0)], s));
+}
+
+pub fn icon_search(painter: &Painter, center: Pos2, color: Color32) {
+    let p = scaled(center, 12.0, 12.0);
+    let s = Stroke::new(1.3_f32, color);
+    painter.circle_stroke(p(5.0, 5.0), 3.5, s);
+    painter.line_segment([p(7.7, 7.7), p(10.5, 10.5)], s);
+}
+
+pub fn icon_chevron_right(painter: &Painter, center: Pos2, size: f32, color: Color32) {
+    let p = scaled(center, size, 12.0);
+    painter.add(egui::Shape::line(
+        vec![p(4.5, 2.0), p(8.5, 6.0), p(4.5, 10.0)],
+        Stroke::new(1.3_f32, color),
+    ));
+}
+
+pub fn icon_chevron_down(painter: &Painter, center: Pos2, size: f32, color: Color32) {
+    let p = scaled(center, size, 12.0);
+    painter.add(egui::Shape::line(
+        vec![p(2.0, 4.5), p(6.0, 8.5), p(10.0, 4.5)],
+        Stroke::new(1.3_f32, color),
+    ));
+}
+
+pub fn icon_chevron_up(painter: &Painter, center: Pos2, size: f32, color: Color32) {
+    let p = scaled(center, size, 12.0);
+    painter.add(egui::Shape::line(
+        vec![p(2.0, 7.5), p(6.0, 3.5), p(10.0, 7.5)],
+        Stroke::new(1.3_f32, color),
+    ));
+}
+
+/// A square icon button (28 px), highlighted while `on`.
+pub fn icon_button(
+    ui: &mut Ui,
+    on: bool,
+    tooltip: &str,
+    paint: impl FnOnce(&Painter, Pos2, Color32),
+) -> Response {
+    let (rect, resp) = ui.allocate_exact_size(vec2(28.0, 28.0), Sense::click());
+    let hovered = resp.hovered();
+    if on {
+        ui.painter().rect_filled(rect, CornerRadius::same(5), BORDER);
+    } else if hovered {
+        ui.painter().rect_filled(rect, CornerRadius::same(5), NAV_ACTIVE);
+    }
+    paint(
+        ui.painter(),
+        rect.center(),
+        if on || hovered { TEXT } else { TEXT_MUTED },
+    );
+    if hovered {
+        ui.ctx().set_cursor_icon(CursorIcon::PointingHand);
+    }
+    resp.on_hover_text(tooltip)
 }
 
 pub fn icon_eye(painter: &Painter, center: Pos2, color: Color32) {

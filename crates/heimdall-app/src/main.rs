@@ -3,8 +3,11 @@
 
 mod app;
 mod chrome;
+mod code;
 mod screens;
+mod search;
 mod session;
+mod spell;
 mod support;
 mod theme;
 mod usb;

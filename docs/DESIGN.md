@@ -218,6 +218,7 @@ Contenido {
     notas: [Nota],          // en el orden de las pestañas
     nota_activa: uuid,      // pestaña seleccionada al cerrar
     papelera: [Nota],       // notas cerradas, ver §10.3
+    diccionario: [String],  // palabras de "Add to dictionary" (§10.8); versión 3
 }
 
 Nota {
@@ -228,6 +229,8 @@ Nota {
     modificada: timestamp,
     cursor: posición,       // para restaurar donde ibas
     eliminada_en: Option<timestamp>,  // solo en la papelera
+    codigo: Option<{ lenguaje: String }>,  // modo código (§10.6); "" = detectar
+    ajuste_linea: Option<bool>,       // ajuste propio de la pestaña (Alt+Z)
 }
 ```
 
@@ -252,7 +255,7 @@ Decisiones que este documento dejaba abiertas y que el código fija:
 | Argon2id del slot de recuperación | m = 64 MiB, t = 2, p = 4 |
 | Entrada del KDF de recuperación | Los 16 bytes de entropía, no el texto de las palabras. Mayúsculas, espacios o comas no importan |
 | Contenido en claro | `longitud (u32) ‖ postcard(version_contenido) ‖ postcard(Contenido) ‖ ceros` hasta múltiplo de 4 KiB. Se rechaza si el relleno no es todo ceros |
-| Versión del contenido | 2 desde la v0.3: agrega `accesos: [ {slot_id, nombre, fecha} ]` al final de `Contenido`. La versión 1 se sigue leyendo y se guarda como 2 |
+| Versión del contenido | 2 desde la v0.3: agrega `accesos: [ {slot_id, nombre, fecha} ]` al final de `Contenido`. La versión 1 se sigue leyendo y se guarda como 2. **3** desde el modo código (§10.6): cada `Nota` agrega `codigo` y `ajuste_linea`, y los ajustes del editor agregan `code_tip`. Las versiones 1 y 2 se siguen leyendo y se guardan como 3 |
 | Keyfile `.bifrost` | `"HMKF" ‖ vault_id (16 B) ‖ secreto (32 B)` = 52 B |
 | Slots de tipo desconocido | Se conservan intactos en guardados normales; al rotar la MK se descartan, porque no se pueden re-envolver |
 | Verificación antes de cambiar accesos | Toda operación sobre los slots (cambiar contraseña, agregar USB, rotar) comprueba primero la contraseña contra un slot existente, para que un error de tecleo nunca deje al usuario fuera |
@@ -326,9 +329,12 @@ Desde *Settings → Security → Change profile*, siempre con un diálogo de con
 ## 7. Código de recuperación
 
 - Se genera al crear la vault: **128 bits** aleatorios, mostrados como **12 palabras** (BIP39, lista en inglés) más un formato alternativo en caracteres agrupados.
-- Se muestra **una sola vez**, con opción de imprimir una "hoja de recuperación" (nombre de la vault, fecha, palabras, instrucciones).
+- Se muestra **una sola vez**, con dos botones debajo de las palabras (en el asistente y al regenerar, rotar, revocar o cambiar de perfil):
+  - **Copy:** copia las 12 palabras. El portapapeles se borra según el temporizador del perfil (§6) y la copia se marca para que Windows **no la guarde en el historial (Win+V) ni la sincronice** con la nube.
+  - **Print…:** abre el diálogo de impresión de Windows e imprime directamente una "hoja de recuperación" (nombre de la vault, fecha, las 12 palabras numeradas, instrucciones). La app **no escribe ningún archivo**: dibuja la página con GDI y la manda a la impresora.
+  - Límites que la app no controla, dichos en este documento y en una nota bajo los botones: la cola de impresión de Windows puede guardar un archivo temporal (*spool*) mientras imprime, y una impresora "Print to PDF" (o XPS, OneNote…) **crea un archivo** con el código. La nota dice: "Print on paper. A "Print to PDF" printer would save the code as a file."
 - La app **obliga a confirmar** escribiendo 3 palabras al azar antes de continuar.
-- El código **nunca** se guarda en disco ni en el portapapeles.
+- El código **nunca** se guarda en disco. Solo llega al portapapeles si el usuario pulsa *Copy*, y entonces con autoborrado.
 - Se puede **regenerar** (con la vault abierta), lo que revoca el anterior y **rota la MK** (§4.5).
 - El código abre la vault **sin contraseña y sin USB**. Es aceptable porque vive en papel, fuera de la computadora, y su entropía hace imposible la fuerza bruta. Pero quien tenga la hoja tiene la vault, y la app lo dice así de claro.
 - Usarlo para entrar **rota la MK** y genera un código nuevo, porque el anterior ya se usó (§4.5).
@@ -391,11 +397,18 @@ El modelo es el **Bloc de notas de Windows 11**: cada nota es una pestaña. Quie
 | Reordenar | Arrastrar la pestaña | El orden se guarda |
 | Renombrar | Doble clic en la pestaña | Si se deja vacío, el título es la primera línea del texto (como hace el Bloc de notas) |
 | Guardar | Ctrl+S | Guarda **toda la vault** (todas las pestañas) en un solo archivo |
-| Buscar | Ctrl+F / Ctrl+Shift+F | En la nota actual / en todas las notas |
+| Buscar | Ctrl+F / Ctrl+Shift+F | En la nota actual / en todas las notas (§10.7) |
+| Siguiente / anterior coincidencia | F3 / Shift+F3 (o Enter / Shift+Enter en la barra) | Salta a la siguiente o anterior, y da la vuelta al llegar al final |
+| Reabrir pestaña cerrada | Ctrl+Shift+T | Restaura de la papelera la nota cerrada más reciente, como en el navegador |
+| Modo código | Ctrl+Shift+M | Activa o desactiva el modo código **solo en la pestaña actual** (§10.6) |
+| Ajuste de línea | Alt+Z | Activa o desactiva el ajuste de línea **solo en la pestaña actual** |
+
+Todos los atajos aparecen en *Settings → Shortcuts*.
 
 - **Indicador de cambios:** un punto `•` en la pestaña con cambios sin guardar, igual que en el Bloc de notas.
 - **Restaurar sesión:** al abrir la vault, las pestañas aparecen en el mismo orden, con la misma pestaña activa y el cursor donde estaba. Todo eso vive dentro del contenido cifrado.
-- **Muchas pestañas:** si no caben, se desplazan horizontalmente y aparece un menú `⌄` con la lista completa.
+- **Ancho de las pestañas:** todas miden lo mismo, 200 px si caben; con más pestañas se achican por igual hasta 96 px. El título se corta con "…" según el ancho, y el título completo aparece al pasar el ratón.
+- **Muchas pestañas:** si no caben, se desplazan horizontalmente y aparece un menú `⌄` con la lista completa. La pestaña activa siempre se desplaza hasta quedar a la vista.
 
 ### 10.2 Autoguardado (cifrado)
 El Bloc de notas de Windows 11 no pierde lo que escribes. Aquí se hace lo mismo, pero **siempre cifrado**:
@@ -419,15 +432,19 @@ Se guardan dentro del contenido cifrado (§5.3), igual que el perfil. Ninguno es
 | La tecla Tab inserta | 2, 4 u 8 espacios, o un tabulador | 4 espacios |
 | Fin de línea | Windows (CRLF) / Unix (LF), al copiar texto fuera | CRLF |
 | Ajuste de línea (*Word wrap*) | Sí / No | Sí |
-| Números de línea | Sí / No | No |
+| Números de línea | Sí / No. En notas normales agrega **solo** la columna de números; el modo código siempre los muestra (§10.6) | No |
 | Barra de estado | Sí / No | Sí |
-| Corrector ortográfico | Sí / No; diccionario incluido en la app, sin red | No |
+| Corrector ortográfico (§10.8) | Sí / No | No |
+| Idioma del corrector | English, Spanish, English + Spanish; diccionarios incluidos en la app, sin red | English + Spanish |
 | Autoguardado cifrado (§10.2) | Sí / No | Sí |
 | Reabrir pestañas al desbloquear (§10.1) | Sí / No | Sí |
+| Aviso del modo código en pestañas nuevas (§10.6) | Sí / No | Sí |
 
 - La codificación no se configura: el texto siempre se guarda en UTF-8.
 - El zoom no es un ajuste: se cambia con Ctrl+ / Ctrl− / Ctrl+0, como en el Bloc de notas, y se recuerda dentro de la vault.
 - Si se desactiva la barra de estado, el estado de seguridad (perfil, USB, bloqueo) sigue disponible en *Settings → Security*.
+- El ajuste de línea global vale para las notas normales. Cada pestaña puede cambiarlo con Alt+Z, y en modo código empieza desactivado (§10.6).
+- Con el corrector activo, debajo aparece el **diccionario personal**: las palabras agregadas, cada una con `×` para quitarla.
 
 ### 10.5 Acerca de (*Settings → About*)
 
@@ -437,11 +454,70 @@ Pantalla informativa, sin ajustes:
 - **Licencia:** GPL-3.0, con enlace al texto completo.
 - **Código fuente:** enlace al repositorio, para que cualquiera pueda auditarlo.
 - **Cifrado:** Argon2id, XChaCha20-Poly1305, HKDF-SHA256, código de recuperación BIP39 (12 palabras, 128 bits) y versión del formato `.heim` (§4.2, §5.1).
-- **Componentes open source:** las crates de §3 y las fuentes incluidas (JetBrains Mono, Inter), cada una con su licencia. Mostrar esta lista es obligatorio por esas licencias.
+- **Componentes open source:** las crates de §3, las fuentes incluidas (JetBrains Mono, Inter) y el corrector (`spellbook`, MPL-2.0; diccionario en_US de SCOWL, licencia permisiva; diccionario es_MX, GPL-3.0 / LGPL-3.0 / MPL-1.1), cada uno con su licencia. Mostrar esta lista es obligatorio por esas licencias.
 - Justo después de los créditos, en gris tenue y pequeño, el easter egg **"Hail the Omnissiah!"**.
 - Pie con el lema "No signal. No trace."
 
 **No hay "Check for updates" ni ninguna otra conexión de red.** La app nunca se conecta a internet (§11); el usuario revisa las versiones nuevas en el repositorio y actualiza a mano. Los enlaces de esta pantalla solo abren el navegador del sistema.
+
+### 10.6 Modo código
+
+Convierte una pestaña en una vista de programación, al estilo de VS Code. Es **individual para cada pestaña**: activarlo en una no cambia las demás. Se activa y desactiva con **Ctrl+Shift+M**, o eligiendo un lenguaje en la barra de estado. Se guarda cifrado con la nota (§5.3).
+
+Qué muestra:
+- **Números de línea** a la izquierda: la línea actual en `#D4D4D4`, las demás en `#848484`.
+- **Resaltado de la línea actual** (fondo apenas más claro).
+- **Colores de sintaxis apagados**, que no rompen la estética gris:
+
+| Elemento | Color |
+|---|---|
+| Palabras clave | `#A9B6D3` |
+| Tipos | `#9CC4B6` |
+| Funciones | `#D9C9A0` |
+| Cadenas | `#B5C98F` |
+| Números | `#D3A98C` |
+| Comentarios | `#8A8A8A`, cursiva |
+| Macros y variables | `#C7A6C2` |
+
+- **Guías de sangría** verticales; la del bloque donde está el cursor, más clara.
+- **Corchetes emparejados:** un recuadro tenue sobre el corchete junto al cursor y su pareja.
+- **Minimapa** a la derecha: todo el texto en miniatura, con la zona visible marcada. Un clic o arrastrar desplaza el texto.
+- **Ícono `</>`** en la pestaña, para distinguir las pestañas de código.
+- **Barra de estado:** `Ln, Col`, `Spaces: 4` (según el ajuste de la tecla Tab) y el **lenguaje**. Al pulsar el lenguaje se abre un selector con búsqueda:
+  - *Plain text* sale del modo código.
+  - *Auto-detect* deduce el lenguaje de la extensión del título de la pestaña (`backup.rs`), o si no, del `#!` de la primera línea o de `<?xml` / `<!doctype html>`.
+  - 19 lenguajes incluidos: Bash, C, C++, C#, CSS, Go, HTML, Java, JavaScript, JSON, Markdown, PowerShell, Python, Rust, SQL, TOML, TypeScript, XML y YAML.
+- **Ajuste de línea desactivado** por defecto en modo código; Alt+Z lo cambia en esa pestaña.
+- La fuente es monoespaciada aunque el ajuste global sea Inter o Segoe UI.
+
+No hay plegado de código (*folding*).
+
+**Aviso en pestañas nuevas.** Al abrir una pestaña (Ctrl+T o `+`) aparece abajo a la derecha una tarjeta pequeña: "Writing code in this tab?", el atajo Ctrl+Shift+M, una casilla *Don't show again* y el enlace *All shortcuts* (abre *Settings → Shortcuts*). Se cierra sola a los 5 s, con una barra de progreso (se pausa con el ratón encima), o con `×`. *Don't show again* se guarda en la vault y se puede reactivar en *Settings → Editor*.
+
+### 10.7 Buscar
+
+**En la nota (Ctrl+F).** Una barra flotante arriba a la derecha del texto (a la izquierda del minimapa en modo código): campo de búsqueda, contador "3 of 12", *Match case* (`Aa`), anterior, siguiente y cerrar.
+- Si hay una selección de una sola línea, se usa como búsqueda; si no, se ofrece la última búsqueda.
+- Todas las coincidencias se marcan con un fondo gris; la actual, más claro. La actual se selecciona y se desplaza a la vista (a un tercio de la altura).
+- Enter / Shift+Enter o F3 / Shift+F3 van a la siguiente / anterior: desde la coincidencia actual si sigue seleccionada; si el cursor se movió (un clic, escribir), desde el cursor. Con la barra cerrada, F3 la abre con la última búsqueda.
+- Escape cierra la barra y devuelve el cursor al texto. Funciona igual en notas normales y en modo código.
+- Búsqueda literal (sin expresiones regulares); sin *Match case*, cada carácter se pasa a minúscula uno a uno, así que las posiciones no se desplazan. Como máximo 10 000 coincidencias por nota (el contador muestra "+").
+
+**En todas las notas (Ctrl+Shift+F).** Un panel en el mismo lugar, más ancho: campo, `Aa`, cerrar y un resumen ("7 results in 3 notes"). Los resultados se agrupan por nota (título y número de coincidencias), con una fila por coincidencia: número de línea y un fragmento de la línea con la coincidencia resaltada. Como máximo 20 filas por nota ("N more in this note"). Un clic abre la nota, selecciona la coincidencia y deja abierta la barra de Ctrl+F con la misma búsqueda. Solo busca en las pestañas abiertas; **la papelera no**.
+
+**Menú de pestañas.** Si las pestañas no caben, aparece un botón `⌄` después de ellas que lista todas (ícono `</>`, punto de cambios sin guardar, la activa marcada). Un clic cambia de pestaña.
+
+Lo buscado vive solo en memoria y se borra (zeroize) al cerrar la barra, el panel o la vault.
+
+### 10.8 Corrector ortográfico
+
+- Subraya con una línea ondulada roja apagada (`#C98A84`) las palabras que no están en el diccionario. La palabra que se está escribiendo no se marca hasta salir de ella.
+- **Nunca corrige solo.** Un clic derecho sobre una palabra marcada abre un menú con hasta 6 sugerencias y *Add to dictionary*. Solo al elegir una sugerencia se reemplaza la palabra.
+- **Diccionarios incluidos** en el ejecutable (Hunspell): inglés (en_US, de SCOWL) y español (es_MX, del proyecto RLA-ES vía LibreOffice). Se cargan en un hilo aparte la primera vez que hacen falta. Con *English + Spanish* una palabra es correcta si la conoce cualquiera de los dos, y las sugerencias se alternan.
+- **Diccionario personal** dentro del contenido cifrado (§5.3). Se compara sin distinguir mayúsculas.
+- No se revisan: URLs, direcciones de correo, palabras con dígitos y siglas en mayúsculas (USB, API).
+- **Desactivado en modo código.**
+- Motor: `spellbook`, en Rust puro, sin red ni archivos.
 
 ---
 
@@ -449,7 +525,7 @@ Pantalla informativa, sin ajustes:
 
 - **Secretos enmascarados:** sintaxis `{{secreto}}` o un botón "marcar como secreto". Se muestra como `••••••` con dos íconos de línea monocromos: **Reveal** (mostrar 5 s) y **Copy** (copiar con autoborrado).
 - **Detector de secretos:** al pegar algo con forma de contraseña o API key, sugiere enmascararlo.
-- **Portapapeles:** autoborrado según el perfil. Solo se borra si el contenido sigue siendo el que copió la app.
+- **Portapapeles:** autoborrado según el perfil. Solo se borra si el contenido sigue siendo el que copió la app. Todo lo que copia la app se marca para que Windows no lo guarde en el historial del portapapeles (Win+V) ni lo sincronice con la nube.
 - **Títulos de pestaña:** si la primera línea contiene un secreto enmascarado, el título lo muestra enmascarado también.
 - **Sin archivos temporales en claro**, sin autoguardado en texto plano, sin "documentos recientes" de Windows.
 - **Cero red:** la app no hace ninguna conexión. Las actualizaciones se revisan manualmente en GitHub.
@@ -496,12 +572,12 @@ heimdall/
 | **v0.1 — Núcleo** | `heimdall-core`: MK, slots de contraseña y recuperación, rotación de MK, formato `.heim` con `slot_len`, modelo de varias notas, guardado atómico y `.bak`, tests y vectores de prueba |
 | **v0.2 — MVP usable** | UI egui: crear/abrir, **pestañas** (nueva, cerrar, reordenar, renombrar), autoguardado cifrado, papelera, perfil Básico, bloqueo automático, portapapeles, zeroize |
 | **v0.3 — Presencia** | Keyfile USB, slot contraseña+keyfile, detección de retiro con guardado de emergencia, perfil Reforzado, gestión de accesos |
-| **v0.4 — Pulido** | Secretos enmascarados, detector de secretos, búsqueda en todas las notas, exclusión de capturas, endurecimiento del proceso |
+| **v0.4 — Pulido** | Secretos enmascarados, detector de secretos, exclusión de capturas, endurecimiento del proceso |
 | **v0.5 — Confianza** | Fuzzing, CI con `cargo-audit`/`cargo-deny`, releases firmados, `SECURITY.md` |
 | **v1.1** | YubiKey/FIDO2 |
 | **Futuro** | Shamir 2-de-3, Linux/macOS |
 
-### 14.1 Estado (2026-10-28)
+### 14.1 Estado (2026-10-29)
 
 - **v0.1 — hecho.** `crates/heimdall-core`, con pruebas (ver §5.5).
 - **v0.2 — hecho, con pendientes.** `crates/heimdall-app` (ejecutable `heimdall.exe`). Probado a mano de punta a punta: crear, abrir, contraseña incorrecta, pestañas, renombrar, autoguardado, papelera, bloqueo manual y por inactividad, entrar con el código de recuperación, portapapeles.
@@ -517,10 +593,24 @@ Decisiones tomadas al implementar la v0.2:
 - **La ventana no guarda su tamaño ni su posición** en disco.
 
 Pendiente de la v0.2:
-- **Imprimir la hoja de recuperación.** El botón no está: la app no puede escribir el código a disco (§7), así que hace falta imprimir directamente con la API de Windows. Por ahora el usuario copia las palabras a mano.
-- **Buscar** (Ctrl+F) y el menú `⌄` con la lista de pestañas cuando no caben.
-- **Ajustes *Line numbers* y *Spell check*:** se guardan en el modelo, pero aún no se muestran en Settings ni hacen nada.
 - **Bloquear al bloquear Windows o al suspender:** pasa a la v0.4, con el resto de §12.
+
+- **Pendientes de la v0.2 — hechos (2026-10-29), sin commit todavía:** copiar e imprimir el código de recuperación (§7), buscar en la nota y en todas las notas, el menú `⌄` de pestañas (§10.7), el corrector ortográfico (§10.8) y el ajuste *Line numbers* (§10.4).
+
+Decisiones tomadas al cerrar los pendientes de la v0.2:
+- **Impresión con GDI** (`PrintDlgW` + `StartDocW`/`TextOutW`) en `heimdall-platform/src/print.rs`, sin archivos intermedios. Fuentes: Segoe UI para el texto y Consolas para las palabras. En las compilaciones de depuración, `HEIMDALL_PRINT_TO=<archivo.pdf>` imprime sin diálogo a "Microsoft Print to PDF" (solo para pruebas; en release no existe).
+- **Exclusión del historial del portapapeles con `arboard`** (`exclude_from_history`, `exclude_from_cloud`, `exclude_from_monitoring`), que pone los formatos que Windows respeta. No hace falta `unsafe` propio en `heimdall-platform`. Se aplica a **todas** las copias de la app, no solo al código. Si `arboard` falla, se copia con egui y la copia sí puede quedar en el historial.
+- **El temporizador del portapapeles para el código** es el del perfil de la vault; en el asistente, el del perfil elegido (la vault aún no está abierta).
+- **El diccionario personal amplía el contenido versión 3** (aún no publicado), en lugar de crear una versión 4. Las versiones 1 y 2 se siguen leyendo. Las vaults versión 3 creadas durante el desarrollo del modo código ya no abren; ninguna salió de las pruebas.
+- **`spellbook` 0.4** (MPL-2.0, compatible con GPL-3.0) como motor Hunspell. Diccionarios de LibreOffice: en_US (SCOWL, permisiva) y es_MX (tri-licencia GPL-3.0+ / LGPL-3.0+ / MPL-1.1). Sus licencias van en `crates/heimdall-app/assets/dictionaries/` y en *About*. Los diccionarios suman ~1,4 MB al ejecutable.
+- **Búsqueda propia** (`crates/heimdall-app/src/search.rs`), literal, sin expresiones regulares.
+- **Las coincidencias y el subrayado se dibujan bajo el texto** en la capa que ya usaba el modo código (línea actual, guías), porque el subrayado de egui queda al fondo de la fila con interlineado.
+- **Números de línea en notas normales:** la columna reemplaza el margen izquierdo de 48 px; sin resaltado de la línea actual (eso es del modo código), solo el número actual más claro.
+- **La búsqueda en todas las notas** se recalcula al cambiar la búsqueda, *Match case* o cualquier nota. No busca en los títulos ni en la papelera.
+- **Settings → Shortcuts** tiene un grupo nuevo *Find*.
+
+Pendiente:
+- No se probó a mano la interfaz nueva (buscar, menú de pestañas, corrector, números de línea, Copy/Print desde la app): el equipo estaba en uso. Sí se probó la impresión de la hoja a PDF llamando directamente a `heimdall-platform`.
 
 - **v0.3 — hecho, falta probarlo con un USB real.** Crate nuevo `crates/heimdall-platform` (§13). Probado con unidades simuladas (ver abajo).
 
@@ -541,6 +631,8 @@ Decisiones tomadas al implementar la v0.3:
 - **Las contraseñas tecleadas se borran de la memoria de egui** al desbloquear y al cerrar cada diálogo, no solo al bloquear.
 - **Pruebas sin hardware:** en las compilaciones de depuración, cada carpeta de `HEIMDALL_FAKE_USB` (separadas por `;`) aparece como una unidad USB. Renombrarla equivale a retirar el USB. En la versión release esto no existe.
 - **Un keyfile revocado se queda en el USB** (Heimdall nunca borra archivos del USB). Ya no abre la vault y Unlock lo muestra como "This key was revoked". Un keyfile nuevo en esa unidad se llama `<nombre>-2.bifrost`.
+- **Las vaults Hardened y Paranoid no salen en Recent vaults**, así que la app ayuda a encontrarlas: el último paso del asistente dice dónde se guardó (`Documents\x.heim`), y Welcome avisa si un USB conectado tiene la llave de una vault que no está en la lista ("x.bifrost on USB (D:) is the key to a vault not listed here…"). El `.bifrost` no guarda la ruta de la vault.
+- **Unlock avisa si hay un `.bifrost` que no se puede leer** ("Damaged key file · x.bifrost on D:") en lugar de quedarse en "Insert your USB key", y sugiere el código de recuperación. Pasó con un USB real (2026-10-28): después de desconectarlo, el archivo tenía el tamaño correcto pero otro contenido; el USB no conservó lo escrito.
 - **Add USB key preselecciona una unidad sin llave de esta vault** (una copia de respaldo en el mismo USB no sirve) y avisa si se elige una que ya tiene.
 - **Probado a mano el 2026-10-28 con unidades simuladas:** crear Hardened, retiro y reinserción, agregar llave, revocar la llave en uso (la presencia pasa a la otra), recuperación con código (el viejo ya no sirve), cambiar contraseña, rotar (espera a que estén todas las llaves), Hardened → Basic → Paranoid → Basic, Basic sin USB.
 
@@ -548,6 +640,21 @@ Pendiente de la v0.3:
 - **Probar con un USB real**: detección, etiqueta, tamaño y retiro físico.
 - **`WM_DEVICECHANGE`** como detector principal del retiro.
 - *Hide window from screenshots* y *Lock when Windows locks or sleeps* (mockup Settings) siguen en la v0.4.
+
+- **Modo código (§10.6) — hecho (2026-10-29), sin commit todavía.** Contenido versión 3. Probado a mano con una vault nueva y con una vault versión 2 creada con el código anterior.
+
+Decisiones tomadas al implementar el modo código:
+- **Resaltador propio** (`crates/heimdall-app/src/code.rs`) en lugar de `syntect` o `tree-sitter`: un tokenizador por bytes con tablas por lenguaje. Son ~900 líneas, sin dependencias nuevas, y los colores salen de la paleta de la app. Es aproximado (por ejemplo, no reconoce expresiones regulares literales de JavaScript ni claves YAML con espacios), pero basta para leer código.
+- **Ctrl+Shift+M y Ctrl+Shift+T se comprueban antes que Ctrl+M / Ctrl+T**, porque egui ignora Shift al comparar atajos. Alt+Z descarta la "z" que llegaría al texto.
+- **Ctrl+Shift+T reabre la nota más reciente de la papelera.** No hay un historial aparte: la papelera ya guarda la fecha de cierre. Las notas vacías no pasan por la papelera (§10.3), así que no se pueden reabrir.
+- **Si *Auto-detect* no reconoce el lenguaje**, la barra de estado muestra *Code* y se resaltan solo cadenas, números y comentarios comunes (`//`, `#`, `/* */`).
+- **El minimapa usa 4 px por línea.** Si el archivo no cabe, el minimapa se desplaza junto con el texto (como en VS Code) en lugar de comprimirse.
+- **Las barras de desplazamiento se ocultan en modo código**: el minimapa ocupa su lugar. El desplazamiento horizontal (sin ajuste de línea) se hace con Shift+rueda o moviendo el cursor.
+- **Fuente monoespaciada:** si el ajuste global es Inter o Segoe UI, el modo código usa Consolas (o JetBrains Mono si no está).
+- **El selector de lenguaje se abre hacia arriba**, alineado a la derecha del botón de la barra de estado. Enter elige el primer resultado; Escape o un clic fuera lo cierran.
+- **Settings → Shortcuts** es una página nueva, entre Editor y Trash.
+- **Al cambiar el modo código de una pestaña** se vuelve al ajuste de línea predeterminado de ese modo (se olvida el Alt+Z anterior).
+
 
 ---
 

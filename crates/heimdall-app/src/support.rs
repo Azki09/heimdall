@@ -121,6 +121,43 @@ impl RecentVaults {
     }
 }
 
+// ---------- Clipboard ----------
+
+/// Puts text on the clipboard, marked so Windows keeps it out of the
+/// clipboard history (Win+V) and the cloud clipboard, and so clipboard
+/// managers that honor it ignore it (DESIGN §11). Every copy from Heimdall
+/// goes through here (see `HeimdallApp::handle_copies`).
+pub fn set_clipboard(text: &str) -> bool {
+    let Ok(mut cb) = arboard::Clipboard::new() else {
+        return false;
+    };
+    #[cfg(windows)]
+    {
+        use arboard::SetExtWindows;
+        cb.set()
+            .exclude_from_monitoring()
+            .exclude_from_history()
+            .exclude_from_cloud()
+            .text(text)
+            .is_ok()
+    }
+    #[cfg(not(windows))]
+    {
+        cb.set_text(text).is_ok()
+    }
+}
+
+/// Copies text that has no vault open to take the timer from (the recovery
+/// code in the wizard): cleared after `clear_after_s` like any other copy.
+pub fn copy_with_timer(ctx: &egui::Context, text: &str, clear_after_s: u32) {
+    ctx.data_mut(|d| d.insert_temp(clear_after_id(), clear_after_s));
+    ctx.copy_text(text.to_owned());
+}
+
+pub fn clear_after_id() -> egui::Id {
+    egui::Id::new("clipboard_clear_after")
+}
+
 // ---------- Clipboard auto-clear ----------
 
 /// Clears the clipboard N seconds after Heimdall copied something, but only

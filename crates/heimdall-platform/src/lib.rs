@@ -1,9 +1,12 @@
 //! Code that talks to the operating system (DESIGN §3, §13): listing USB
-//! drives for the key file (§8) and process-wide settings. Only Windows is
-//! implemented; other systems get stubs so the rest of the code compiles.
+//! drives for the key file (§8), printing the recovery sheet (§7) and
+//! process-wide settings. Only Windows is implemented; other systems get
+//! stubs so the rest of the code compiles.
 
 use std::path::PathBuf;
 
+#[cfg(windows)]
+mod print;
 #[cfg(windows)]
 mod windows;
 
@@ -60,6 +63,40 @@ pub fn usb_drives() -> Vec<Drive> {
     #[cfg(debug_assertions)]
     drives.extend(fake_drives());
     drives
+}
+
+/// What goes on the printed recovery sheet.
+pub struct RecoverySheet<'a> {
+    /// File name of the vault ("personal.heim").
+    pub vault: &'a str,
+    /// When it was printed, already formatted.
+    pub date: &'a str,
+    /// The 12 words, in order.
+    pub words: &'a [&'a str],
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PrintOutcome {
+    Printed,
+    /// The user closed the print dialog (or a "save as" printer's file dialog).
+    Canceled,
+    Failed(String),
+}
+
+/// Shows the Windows print dialog and prints the sheet on the chosen
+/// printer. Nothing is written to disk by Heimdall; the Windows spooler may
+/// keep the page in its own queue until it is printed.
+///
+/// Debug builds print to "Microsoft Print to PDF" without a dialog when
+/// `HEIMDALL_PRINT_TO` names the output file, for testing.
+pub fn print_recovery_sheet(sheet: &RecoverySheet) -> PrintOutcome {
+    #[cfg(windows)]
+    return print::print_recovery_sheet(sheet);
+    #[cfg(not(windows))]
+    {
+        let _ = sheet;
+        PrintOutcome::Failed("Printing is only available on Windows for now.".into())
+    }
 }
 
 #[cfg(debug_assertions)]

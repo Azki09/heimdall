@@ -1,11 +1,13 @@
 //! Welcome: recent vaults, Open vault, Create vault (Welcome mockup).
 
 use eframe::egui::{self, pos2, vec2, Align2, CornerRadius, CursorIcon, Sense, Stroke, StrokeKind};
+use heimdall_core::format::VaultId;
 use heimdall_core::LockedVault;
 
 use crate::app::Action;
 use crate::support::{file_name, friendly_date, RecentVaults};
 use crate::theme::*;
+use crate::usb::{self, KeyFile, Scan};
 use crate::widgets::{self, ButtonKind};
 use crate::{chrome, screens};
 
@@ -18,10 +20,16 @@ struct Item {
 
 pub struct Welcome {
     items: Vec<Item>,
+    /// Vaults in the list, so a key file for one of them isn't pointed out.
+    listed: Vec<VaultId>,
+    /// Key files on connected USB drives. Hardened vaults aren't remembered,
+    /// so a key whose vault isn't listed is a hint that it exists (§8).
+    keys: Scan<Vec<KeyFile>>,
 }
 
 impl Welcome {
     pub fn new(recent: &RecentVaults) -> Self {
+        let mut listed = Vec::new();
         let items = recent
             .entries
             .iter()
@@ -34,10 +42,11 @@ impl Welcome {
                     .map(|n| n.to_string_lossy().into_owned())
                     .unwrap_or_default();
                 // Only the plaintext header is read, to say whether a USB key is needed.
-                let needs_usb = heimdall_core::storage::read_vault(&e.path)
+                let locked = heimdall_core::storage::read_vault(&e.path)
                     .ok()
-                    .and_then(|b| LockedVault::parse(&b).ok())
-                    .is_some_and(|l| l.requires_keyfile());
+                    .and_then(|b| LockedVault::parse(&b).ok());
+                listed.extend(locked.as_ref().map(|l| *l.vault_id()));
+                let needs_usb = locked.is_some_and(|l| l.requires_keyfile());
                 let detail = if needs_usb {
                     format!("{folder} · USB key required")
                 } else {
@@ -51,11 +60,39 @@ impl Welcome {
                 }
             })
             .collect();
-        Self { items }
+        Self {
+            items,
+            listed,
+            keys: usb::key_file_scan(),
+        }
+    }
+
+    /// "Key file test1.bifrost on USB (D:)…" for keys of unlisted vaults.
+    fn key_hints(&self) -> Vec<String> {
+        let files = self.keys.value.iter().flatten();
+        files
+            .filter(|f| f.keyfile.as_ref().is_some_and(|k| !self.listed.contains(k.vault_id())))
+            .take(2)
+            .map(|f| {
+                let stem = f.path.file_stem().map(|s| s.to_string_lossy()).unwrap_or_default();
+                // `test1-2.bifrost` belongs to `test1.heim`.
+                let vault = match stem.rsplit_once('-') {
+                    Some((base, n)) if n.parse::<u32>().is_ok() => base.to_owned(),
+                    _ => stem.into_owned(),
+                };
+                format!(
+                    "{} on {} is the key to a vault not listed here. Open it with Open vault… (look for {vault}.heim).",
+                    f.file_name(),
+                    usb::drive_label(&f.drive)
+                )
+            })
+            .collect()
     }
 
     pub fn ui(&mut self, ctx: &egui::Context) -> Option<Action> {
         let mut action = None;
+        self.keys.poll(ctx);
+        let hints = self.key_hints();
         chrome::title_bar(ctx, |ui| chrome::title_text(ui, "Heimdall"));
         chrome::tagline_footer(ctx);
 
@@ -64,7 +101,8 @@ impl Welcome {
         } else {
             30.0 + self.items.len() as f32 * 64.0 + 20.0
         };
-        screens::centered_column(ctx, 440.0, 150.0 + 44.0 + list_h + 42.0, |ui| {
+        let hints_h = hints.len() as f32 * 44.0 + if hints.is_empty() { 0.0 } else { 14.0 };
+        screens::centered_column(ctx, 440.0, 150.0 + 44.0 + list_h + 42.0 + hints_h, |ui| {
             ui.vertical_centered(|ui| widgets::logo(ui, 8.0));
             ui.add_space(44.0);
 
@@ -133,6 +171,23 @@ impl Welcome {
                     action = Some(Action::Create);
                 }
             });
+            if !hints.is_empty() {
+                ui.add_space(14.0);
+            }
+            for hint in &hints {
+                ui.scope(|ui| {
+                    ui.set_max_width(440.0);
+                    ui.add(
+                        egui::Label::new(
+                            egui::RichText::new(hint)
+                                .font(crate::theme::ui(12.0))
+                                .color(TEXT_MUTED),
+                        )
+                        .wrap(),
+                    );
+                });
+                ui.add_space(8.0);
+            }
         });
         action
     }

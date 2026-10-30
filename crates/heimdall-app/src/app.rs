@@ -5,8 +5,9 @@ use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 use eframe::egui::{self, OutputCommand};
-use heimdall_core::content::LineEnding;
+use heimdall_core::content::{LineEnding, Profile, SecuritySettings};
 use heimdall_core::Vault;
+use zeroize::Zeroize;
 
 use crate::screens::editor::EditorState;
 use crate::screens::settings::Settings;
@@ -14,7 +15,7 @@ use crate::screens::unlock::{LockInfo, Unlock};
 use crate::screens::welcome::Welcome;
 use crate::screens::wizard::Wizard;
 use crate::session::Session;
-use crate::support::{clock, ClipboardGuard, RecentVaults};
+use crate::support::{self, clock, ClipboardGuard, RecentVaults};
 use crate::usb::UsbKey;
 use crate::{chrome, theme};
 
@@ -38,6 +39,8 @@ pub enum Action {
     },
     Lock(LockReason),
     Settings,
+    /// Settings, open on the keyboard shortcuts.
+    Shortcuts,
     Notes,
 }
 
@@ -101,6 +104,7 @@ impl HeimdallApp {
             }
             Action::Lock(reason) => self.lock(ctx, reason),
             Action::Settings => self.screen = Screen::Settings(Box::default()),
+            Action::Shortcuts => self.screen = Screen::Settings(Box::new(Settings::shortcuts())),
             Action::Notes => self.screen = Screen::Editor,
         }
     }
@@ -178,20 +182,38 @@ impl HeimdallApp {
             .then_some(LockReason::Inactivity(secs))
     }
 
-    /// Clipboard auto-clear and CRLF conversion on copy (DESIGN §10.4, §11).
+    /// Every copy: CRLF conversion, kept out of the clipboard history, and
+    /// auto-cleared (DESIGN §10.4, §11).
     fn handle_copies(&mut self, ctx: &egui::Context) {
-        let Some(session) = &self.session else { return };
-        let crlf = session.vault.content.editor.line_ending == LineEnding::Crlf;
-        let clear_after = session.vault.content.security.clipboard_clear_s;
+        let crlf = self
+            .session
+            .as_ref()
+            .is_some_and(|s| s.vault.content.editor.line_ending == LineEnding::Crlf);
+        let timer = ctx.data_mut(|d| d.remove_temp::<u32>(support::clear_after_id()));
+        let clear_after = timer
+            .or(self
+                .session
+                .as_ref()
+                .map(|s| s.vault.content.security.clipboard_clear_s))
+            .unwrap_or(SecuritySettings::defaults_for(Profile::Basic).clipboard_clear_s);
         ctx.output_mut(|o| {
-            for cmd in &mut o.commands {
-                if let OutputCommand::CopyText(text) = cmd {
-                    if crlf {
-                        *text = text.replace("\r\n", "\n").replace('\n', "\r\n");
-                    }
-                    self.clipboard.copied(text, clear_after);
+            o.commands.retain_mut(|cmd| {
+                let OutputCommand::CopyText(text) = cmd else {
+                    return true;
+                };
+                if crlf {
+                    let converted = text.replace("\r\n", "\n").replace('\n', "\r\n");
+                    text.zeroize();
+                    *text = converted;
                 }
-            }
+                self.clipboard.copied(text, clear_after);
+                if !support::set_clipboard(text) {
+                    // Let egui try; then the text isn't kept out of the history.
+                    return true;
+                }
+                text.zeroize();
+                false
+            });
         });
     }
 }

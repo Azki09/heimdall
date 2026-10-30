@@ -1,6 +1,6 @@
 [package]
 name = "heimdall-platform"
-description = "Heimdall OS-specific code: USB drives and process settings. Windows first."
+description = "Heimdall OS-specific code: USB drives, printing and process settings. Windows first."
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -9,12 +9,16 @@ rust-version.workspace = true
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.59", features = [
     "Win32_Foundation",
+    "Win32_Graphics_Gdi",
     "Win32_Security",
     "Win32_Storage_FileSystem",
+    "Win32_Storage_Xps",
     "Win32_System_Diagnostics_Debug",
     "Win32_System_IO",
     "Win32_System_Ioctl",
     "Win32_System_WindowsProgramming",
+    "Win32_UI_Controls_Dialogs",
+    "Win32_UI_Input_KeyboardAndMouse",
 ] }
 
 # The only crate allowed to call the OS through FFI. `unsafe` is denied

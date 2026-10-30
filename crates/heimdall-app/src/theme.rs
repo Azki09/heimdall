@@ -23,6 +23,22 @@ pub const TRACK_OFF: Color32 = Color32::from_rgb(0x2E, 0x2E, 0x2E);
 pub const OK: Color32 = Color32::from_rgb(0x6E, 0x9C, 0x7A);
 pub const DANGER: Color32 = Color32::from_rgb(0xC9, 0x8A, 0x84);
 
+// Code mode (DESIGN §10.6): muted syntax colors from the Code mode mockup.
+pub const SYN_KEYWORD: Color32 = Color32::from_rgb(0xA9, 0xB6, 0xD3);
+pub const SYN_TYPE: Color32 = Color32::from_rgb(0x9C, 0xC4, 0xB6);
+pub const SYN_FUNCTION: Color32 = Color32::from_rgb(0xD9, 0xC9, 0xA0);
+pub const SYN_STRING: Color32 = Color32::from_rgb(0xB5, 0xC9, 0x8F);
+pub const SYN_NUMBER: Color32 = Color32::from_rgb(0xD3, 0xA9, 0x8C);
+pub const SYN_COMMENT: Color32 = TEXT_MUTED;
+pub const SYN_MACRO: Color32 = Color32::from_rgb(0xC7, 0xA6, 0xC2);
+pub const GUTTER: Color32 = Color32::from_rgb(0x84, 0x84, 0x84);
+pub const CURRENT_LINE: Color32 = DIVIDER;
+pub const GUIDE: Color32 = BORDER;
+pub const GUIDE_ACTIVE: Color32 = Color32::from_rgb(0x55, 0x55, 0x55);
+pub const BRACKET: Color32 = Color32::from_rgb(0x4C, 0x4C, 0x4C);
+pub const POPUP: Color32 = DIVIDER;
+pub const POPUP_BORDER: Color32 = TRACK_OFF;
+
 pub const MEDIUM: &str = "Inter Medium";
 const CONSOLAS: &str = "Consolas";
 const SEGOE: &str = "Segoe UI";

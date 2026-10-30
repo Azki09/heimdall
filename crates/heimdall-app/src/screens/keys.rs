@@ -6,10 +6,11 @@ use std::path::PathBuf;
 
 use eframe::egui::{self, pos2, vec2, Align2, CornerRadius, Sense, Stroke, StrokeKind, Ui};
 use heimdall_core::RecoveryCode;
+use heimdall_platform::PrintOutcome;
 
 use crate::theme::*;
 use crate::usb::Drive;
-use crate::widgets;
+use crate::widgets::{self, ButtonKind};
 
 // ---------- Recovery code ----------
 
@@ -49,12 +50,68 @@ pub fn code_notes(ui: &mut Ui) {
             "This code opens the vault without your password.",
             " Keep it like a passport.",
         ),
-        (
-            "It is shown only once.",
-            " It is never saved to disk or copied to the clipboard.",
-        ),
+        ("It is shown only once.", " Heimdall never saves it to disk."),
     ] {
         bullet(ui, lead, rest);
+    }
+}
+
+/// Copy and Print under the code (DESIGN §7), with the result of the last
+/// one.
+#[derive(Default)]
+pub struct CodeActions {
+    status: Option<String>,
+}
+
+impl CodeActions {
+    /// `vault` is the file name printed on the sheet; `clear_after_s` is
+    /// the clipboard timer of the vault's profile.
+    pub fn ui(&mut self, ui: &mut Ui, code: &RecoveryCode, vault: &str, clear_after_s: u32) {
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = 8.0;
+            if widgets::button(ui, ButtonKind::Secondary, "Copy", true, vec2(0.0, 34.0))
+                .on_hover_text("Copy the 12 words")
+                .clicked()
+            {
+                crate::support::copy_with_timer(ui.ctx(), &code.phrase(), clear_after_s);
+                self.status = Some(format!(
+                    "Copied. The clipboard is cleared in {clear_after_s} s, and Windows doesn't keep it in its clipboard history."
+                ));
+            }
+            if widgets::button(ui, ButtonKind::Secondary, "Print…", true, vec2(0.0, 34.0))
+                .on_hover_text("Print a recovery sheet")
+                .clicked()
+            {
+                let words = code.words();
+                let date = chrono::Local::now().format("%b %-d, %Y").to_string();
+                let sheet = heimdall_platform::RecoverySheet {
+                    vault,
+                    date: &date,
+                    words: &words,
+                };
+                self.status = match heimdall_platform::print_recovery_sheet(&sheet) {
+                    PrintOutcome::Printed => Some("Sent to the printer. Collect the sheet right away.".into()),
+                    PrintOutcome::Canceled => self.status.take(),
+                    PrintOutcome::Failed(e) => Some(e),
+                };
+            }
+        });
+        ui.add_space(6.0);
+        let text = self
+            .status
+            .as_deref()
+            .unwrap_or("Print on paper. A \"Print to PDF\" printer would save the code as a file.");
+        ui.scope(|ui| {
+            ui.set_max_width(460.0);
+            ui.add(
+                egui::Label::new(
+                    egui::RichText::new(text)
+                        .font(crate::theme::ui(12.0))
+                        .color(TEXT_MUTED),
+                )
+                .wrap(),
+            );
+        });
     }
 }
 

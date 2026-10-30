@@ -35,9 +35,28 @@ pub fn drive_label(d: &Drive) -> String {
     format!("{} ({})", d.name, d.letter())
 }
 
-/// Every key file for `vault_id` in the root folder of each USB drive.
-/// Only the root is searched: that is where Heimdall writes them.
-pub fn find_keys(vault_id: &VaultId) -> Vec<UsbKey> {
+/// A `.bifrost` file in the root folder of a USB drive.
+#[derive(Clone)]
+pub struct KeyFile {
+    pub path: PathBuf,
+    pub drive: Drive,
+    /// `None` if the file is not a key file: damaged, or not Heimdall's.
+    pub keyfile: Option<Keyfile>,
+}
+
+impl KeyFile {
+    /// `test1.bifrost`
+    pub fn file_name(&self) -> String {
+        self.path
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default()
+    }
+}
+
+/// Every `.bifrost` file in the root folder of each USB drive. Only the
+/// root is searched: that is where Heimdall writes them.
+pub fn key_files() -> Vec<KeyFile> {
     let mut found = Vec::new();
     for drive in heimdall_platform::usb_drives() {
         let Ok(entries) = fs::read_dir(&drive.root) else {
@@ -45,21 +64,13 @@ pub fn find_keys(vault_id: &VaultId) -> Vec<UsbKey> {
         };
         for entry in entries.flatten().take(512) {
             let path = entry.path();
-            let is_key = path
+            let is_bifrost = path
                 .extension()
                 .is_some_and(|e| e.eq_ignore_ascii_case(KEYFILE_EXTENSION))
-                && entry
-                    .metadata()
-                    .is_ok_and(|m| m.is_file() && m.len() == KEYFILE_LEN as u64);
-            if !is_key {
-                continue;
-            }
-            let Some(keyfile) = read_keyfile(&path) else {
-                continue;
-            };
-            if keyfile.vault_id() == vault_id {
-                found.push(UsbKey {
-                    keyfile,
+                && entry.metadata().is_ok_and(|m| m.is_file());
+            if is_bifrost {
+                found.push(KeyFile {
+                    keyfile: read_keyfile(&path),
                     path,
                     drive: drive.clone(),
                 });
@@ -69,7 +80,49 @@ pub fn find_keys(vault_id: &VaultId) -> Vec<UsbKey> {
     found
 }
 
+/// Every key file for `vault_id` on the connected USB drives.
+pub fn find_keys(vault_id: &VaultId) -> Vec<UsbKey> {
+    key_files()
+        .into_iter()
+        .filter_map(|f| {
+            let keyfile = f.keyfile.filter(|k| k.vault_id() == vault_id)?;
+            Some(UsbKey {
+                keyfile,
+                path: f.path,
+                drive: f.drive,
+            })
+        })
+        .collect()
+}
+
+/// What the Unlock screen looks for: this vault's keys, and any `.bifrost`
+/// file that can't be read (it may be this vault's key, damaged).
+#[derive(Clone, Default)]
+pub struct Lookup {
+    pub keys: Vec<UsbKey>,
+    pub unreadable: Vec<KeyFile>,
+}
+
+pub fn lookup(vault_id: &VaultId) -> Lookup {
+    let mut out = Lookup::default();
+    for f in key_files() {
+        match &f.keyfile {
+            Some(k) if k.vault_id() == vault_id => out.keys.push(UsbKey {
+                keyfile: k.clone(),
+                path: f.path,
+                drive: f.drive,
+            }),
+            Some(_) => {}
+            None => out.unreadable.push(f),
+        }
+    }
+    out
+}
+
 fn read_keyfile(path: &Path) -> Option<Keyfile> {
+    if fs::metadata(path).ok()?.len() != KEYFILE_LEN as u64 {
+        return None;
+    }
     let bytes = zeroize::Zeroizing::new(fs::read(path).ok()?);
     Keyfile::parse(&bytes).ok()
 }
@@ -155,6 +208,14 @@ const SCAN_EVERY: Duration = Duration::from_secs(1);
 
 pub fn key_scan(vault_id: VaultId) -> Scan<Vec<UsbKey>> {
     Scan::new(move || find_keys(&vault_id))
+}
+
+pub fn lookup_scan(vault_id: VaultId) -> Scan<Lookup> {
+    Scan::new(move || lookup(&vault_id))
+}
+
+pub fn key_file_scan() -> Scan<Vec<KeyFile>> {
+    Scan::new(key_files)
 }
 
 pub fn drive_scan() -> Scan<Vec<Drive>> {
@@ -254,6 +315,18 @@ mod tests {
         assert_eq!(found.len(), 1);
         assert_eq!(found[0].keyfile.hint(), mine.hint());
         assert_eq!(found[0].path.file_name().unwrap(), "a.bifrost");
+
+        // Unlock also reports the file that isn't a key.
+        // (Only files in the test folder: a real USB drive may be plugged in.)
+        let lookup = lookup(&[7; 16]);
+        assert_eq!(lookup.keys.len(), 1);
+        let unreadable: Vec<String> = lookup
+            .unreadable
+            .iter()
+            .filter(|f| f.path.starts_with(&dir))
+            .map(KeyFile::file_name)
+            .collect();
+        assert_eq!(unreadable, ["junk.bifrost"]);
         fs::remove_dir_all(&dir).unwrap();
     }
 }

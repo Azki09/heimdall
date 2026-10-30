@@ -13,7 +13,7 @@ use eframe::egui::{self, pos2, vec2, Align2, CornerRadius, Sense, Stroke, Stroke
 use heimdall_core::content::{Profile, SecuritySettings};
 use heimdall_core::{KdfParams, Keyfile, RecoveryCode, SecretString, SlotId, SlotKind, Vault};
 
-use crate::screens::keys::{self, CodeCheck};
+use crate::screens::keys::{self, CodeActions, CodeCheck};
 use crate::session::{label_new_slots, Session};
 use crate::support::{duration_label, error_message, Job, RecentVaults};
 use crate::theme::*;
@@ -76,6 +76,7 @@ struct NewCode {
     code: RecoveryCode,
     check: CodeCheck,
     confirming: bool,
+    actions: CodeActions,
 }
 
 #[derive(Default)]
@@ -187,6 +188,7 @@ impl Access {
                 code,
                 check: CodeCheck::new(),
                 confirming: false,
+                actions: CodeActions::default(),
             });
         }
     }
@@ -405,7 +407,7 @@ impl Access {
     // ---------- New recovery code ----------
 
     /// Replaces the page while a new code is on screen.
-    pub fn code_ui(&mut self, ui: &mut Ui) {
+    pub fn code_ui(&mut self, ui: &mut Ui, s: &Session) {
         let Some(nc) = &mut self.code else { return };
         let mut done = false;
         if !nc.confirming {
@@ -418,7 +420,14 @@ impl Access {
             );
             ui.add_space(24.0);
             keys::code_grid(ui, &nc.code, 460.0);
-            ui.add_space(20.0);
+            ui.add_space(14.0);
+            nc.actions.ui(
+                ui,
+                &nc.code,
+                &s.file_name(),
+                s.vault.content.security.clipboard_clear_s,
+            );
+            ui.add_space(16.0);
             keys::code_notes(ui);
             ui.add_space(24.0);
             if widgets::button(
