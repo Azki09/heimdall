@@ -1,10 +1,12 @@
 //! Code that talks to the operating system (DESIGN §3, §13): listing USB
 //! drives for the key file (§8), printing the recovery sheet (§7) and
-//! process-wide settings. Only Windows is implemented; other systems get
+//! process hardening (§12). Only Windows is implemented; other systems get
 //! stubs so the rest of the code compiles.
 
 use std::path::PathBuf;
 
+#[cfg(windows)]
+mod harden;
 #[cfg(windows)]
 mod print;
 #[cfg(windows)]
@@ -42,10 +44,65 @@ impl Drive {
 }
 
 /// Call once at startup. On Windows, stops the system from showing "insert
-/// a disk" dialogs when a removed drive is probed.
+/// a disk" dialogs when a removed drive is probed, and makes a crash end
+/// the process without a crash dump (DESIGN §12).
 pub fn init() {
     #[cfg(windows)]
-    windows::init();
+    harden::init();
+}
+
+/// Keeps the memory at `address` out of the page file (`VirtualLock`), for
+/// the Master Key. Whole pages are locked. Returns false if Windows refused.
+pub fn lock_memory(address: usize, len: usize) -> bool {
+    #[cfg(windows)]
+    return harden::lock_memory(address, len);
+    #[cfg(not(windows))]
+    {
+        let _ = (address, len);
+        false
+    }
+}
+
+/// Hides the window from screenshots, screen recording and screen sharing
+/// (it shows black there). `window` is the native handle (`HWND`).
+pub fn set_capture_excluded(window: isize, on: bool) -> bool {
+    #[cfg(windows)]
+    return harden::set_capture_excluded(window, on);
+    #[cfg(not(windows))]
+    {
+        let _ = (window, on);
+        false
+    }
+}
+
+/// Something that must lock the vault (DESIGN §12).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SessionEvent {
+    /// Windows was locked (Win+L).
+    Locked,
+    /// The computer is going to sleep or hibernate.
+    Suspending,
+}
+
+/// Starts watching for [`SessionEvent`]s on `window`; `wake` is called
+/// when one arrives (to repaint, so the app picks it up). Call once, from
+/// the UI thread.
+pub fn watch_session(window: isize, wake: impl Fn() + Send + Sync + 'static) -> bool {
+    #[cfg(windows)]
+    return harden::watch_session(window, Box::new(wake));
+    #[cfg(not(windows))]
+    {
+        let _ = (window, wake);
+        false
+    }
+}
+
+/// The last event since the previous call; sleep wins over lock.
+pub fn take_session_event() -> Option<SessionEvent> {
+    #[cfg(windows)]
+    return harden::take_session_event();
+    #[cfg(not(windows))]
+    None
 }
 
 /// USB drives currently connected: removable drives, plus fixed drives on

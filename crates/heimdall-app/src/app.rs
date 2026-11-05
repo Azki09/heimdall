@@ -1,5 +1,6 @@
 //! Top-level state machine: which screen is showing, the open session,
-//! auto-lock, autosave and clipboard auto-clear.
+//! auto-lock (also when Windows locks or sleeps), autosave, clipboard
+//! auto-clear and capture exclusion.
 
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
@@ -50,6 +51,8 @@ pub enum LockReason {
     Inactivity(u32),
     Minimized,
     UsbRemoved,
+    WindowsLocked,
+    Suspended,
 }
 
 enum Screen {
@@ -67,6 +70,9 @@ pub struct HeimdallApp {
     recent: RecentVaults,
     clipboard: ClipboardGuard,
     last_input: Instant,
+    /// The native window, once known; and what was last applied to it.
+    window: Option<isize>,
+    capture_excluded: Option<bool>,
 }
 
 impl HeimdallApp {
@@ -81,6 +87,61 @@ impl HeimdallApp {
             recent,
             clipboard: ClipboardGuard::default(),
             last_input: Instant::now(),
+            window: None,
+            capture_excluded: None,
+        }
+    }
+
+    /// Finds the native window on the first frame and starts watching for
+    /// Windows locking or going to sleep (DESIGN §12).
+    fn attach_window(&mut self, ctx: &egui::Context, frame: &eframe::Frame) {
+        if self.window.is_some() {
+            return;
+        }
+        use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+        let Ok(handle) = frame.window_handle() else {
+            return;
+        };
+        let RawWindowHandle::Win32(h) = handle.as_raw() else {
+            return;
+        };
+        let hwnd = h.hwnd.get();
+        self.window = Some(hwnd);
+        let ctx = ctx.clone();
+        heimdall_platform::watch_session(hwnd, move || ctx.request_repaint());
+    }
+
+    /// Hidden from screen capture unless an open Basic vault turned it off.
+    /// With no vault open (Welcome, Unlock, the wizard) it is always on.
+    ///
+    /// Debug builds leave the window capturable when `HEIMDALL_ALLOW_CAPTURE`
+    /// is set, so UI tests can take screenshots.
+    fn apply_capture_exclusion(&mut self) {
+        let Some(hwnd) = self.window else {
+            return;
+        };
+        #[cfg(debug_assertions)]
+        if std::env::var_os("HEIMDALL_ALLOW_CAPTURE").is_some() {
+            return;
+        }
+        let on = self
+            .session
+            .as_ref()
+            .is_none_or(|s| s.vault.content.security.exclude_from_capture);
+        if self.capture_excluded != Some(on) && heimdall_platform::set_capture_excluded(hwnd, on) {
+            self.capture_excluded = Some(on);
+        }
+    }
+
+    /// Sleep always locks; Win+L too, unless a Basic vault turned it off.
+    fn session_event_lock(&self) -> Option<LockReason> {
+        let event = heimdall_platform::take_session_event()?;
+        let security = &self.session.as_ref()?.vault.content.security;
+        match event {
+            heimdall_platform::SessionEvent::Suspending => Some(LockReason::Suspended),
+            heimdall_platform::SessionEvent::Locked => (security.profile != Profile::Basic
+                || security.lock_on_windows_lock)
+                .then_some(LockReason::WindowsLocked),
         }
     }
 
@@ -159,6 +220,8 @@ impl HeimdallApp {
             }
             LockReason::Minimized => "Locked when the window was minimized".to_owned(),
             LockReason::UsbRemoved => "Locked because the USB key was removed".to_owned(),
+            LockReason::WindowsLocked => "Locked when Windows was locked".to_owned(),
+            LockReason::Suspended => "Locked before the computer went to sleep".to_owned(),
         };
         self.screen = Screen::Unlock(Box::new(Unlock::new(path, Some(LockInfo { reason, saved_at }))));
     }
@@ -183,7 +246,7 @@ impl HeimdallApp {
     }
 
     /// Every copy: CRLF conversion, kept out of the clipboard history, and
-    /// auto-cleared (DESIGN §10.4, §11).
+    /// auto-cleared (DESIGN §10.4, §11.2).
     fn handle_copies(&mut self, ctx: &egui::Context) {
         let crlf = self
             .session
@@ -196,6 +259,12 @@ impl HeimdallApp {
                 .as_ref()
                 .map(|s| s.vault.content.security.clipboard_clear_s))
             .unwrap_or(SecuritySettings::defaults_for(Profile::Basic).clipboard_clear_s);
+        // A copy that includes a masked secret: its own, shorter timer (§11.2).
+        let secret_after = self
+            .session
+            .as_ref()
+            .map_or(clear_after, |s| s.vault.content.security.secret_clear_s)
+            .min(clear_after);
         ctx.output_mut(|o| {
             o.commands.retain_mut(|cmd| {
                 let OutputCommand::CopyText(text) = cmd else {
@@ -206,7 +275,12 @@ impl HeimdallApp {
                     text.zeroize();
                     *text = converted;
                 }
-                self.clipboard.copied(text, clear_after);
+                let after = if heimdall_core::secret::contains_secret(text) {
+                    secret_after
+                } else {
+                    clear_after
+                };
+                self.clipboard.copied(text, after);
                 if !support::set_clipboard(text) {
                     // Let egui try; then the text isn't kept out of the history.
                     return true;
@@ -230,8 +304,9 @@ impl eframe::App for HeimdallApp {
         egui::Rgba::from(theme::BG).to_array()
     }
 
-    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+    fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
         chrome::handle_resize(ctx);
+        self.attach_window(ctx, frame);
 
         if ctx.input(|i| !i.events.is_empty() || i.pointer.is_moving()) {
             self.last_input = Instant::now();
@@ -246,7 +321,7 @@ impl eframe::App for HeimdallApp {
             self.clipboard.clear_now();
         }
 
-        if let Some(reason) = self.auto_lock(ctx) {
+        if let Some(reason) = self.session_event_lock().or_else(|| self.auto_lock(ctx)) {
             self.lock(ctx, reason);
         }
         if let Some(s) = self.session.as_mut() {
@@ -273,6 +348,7 @@ impl eframe::App for HeimdallApp {
         }
 
         self.handle_copies(ctx);
+        self.apply_capture_exclusion();
         let clip_due = self.clipboard.tick();
         chrome::paint_border(ctx);
 

@@ -164,6 +164,7 @@ impl Access {
         }
         label_new_slots(&mut vault, &p.before, done.added.as_ref());
         s.vault = vault;
+        s.lock_key_memory();
 
         // Presence watches a key that still opens the vault.
         if !s.usb.as_ref().is_some_and(|k| s.key_slot(k).is_some()) {

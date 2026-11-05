@@ -2,7 +2,8 @@
 //! (Editor mockup; behavior from DESIGN §10.1). A tab in code mode
 //! (§10.6) adds line numbers, syntax colors, indent guides, matching
 //! brackets and a minimap (Code mode mockups). Also find (Ctrl+F), find
-//! in all notes (Ctrl+Shift+F) and spell check (§10.5, §10.4).
+//! in all notes (Ctrl+Shift+F), spell check (§10.5, §10.4) and masked
+//! secrets (§11; layout and caret rules in `crate::secrets`).
 
 use std::hash::{Hash, Hasher};
 use std::ops::Range;
@@ -13,18 +14,21 @@ use eframe::egui::{
     self, pos2, text::CCursor, text::CCursorRange, text::LayoutJob, vec2, Align2, CornerRadius, CursorIcon,
     FontId, Key, Modifiers, Pos2, Rect, Sense, Shape, Stroke, Ui, Vec2,
 };
-use heimdall_core::content::{CodeMode, Font, Note, TabInsert};
+use heimdall_core::content::{CodeMode, Font, Note, Profile, SecuritySettings, TabInsert};
+use heimdall_core::secret;
 use uuid::Uuid;
 use zeroize::{Zeroize, Zeroizing};
 
 use crate::app::{Action, LockReason};
 use crate::chrome;
 use crate::code::{self, Kind};
+use crate::screens::confirm::{Outcome, PasswordCheck};
 use crate::search::{self, Match};
+use crate::secrets::{self, IconEvent, Pasted};
 use crate::session::Session;
 use crate::spell::Speller;
 use crate::theme::*;
-use crate::widgets::{self};
+use crate::widgets::{self, ButtonKind, SecretField};
 
 const TAB_H: f32 = 32.0;
 /// Every tab has the same width: the widest that fits, within these bounds.
@@ -71,6 +75,20 @@ pub struct EditorState {
     spell: Speller,
     /// The right-click menu of a misspelled word, while it is open.
     spell_menu: Option<SpellMenu>,
+    /// Which secrets of the active note show their value.
+    reveals: Reveals,
+    /// Ctrl+Shift+H (or the menu): make the selection a secret.
+    mark_secret: bool,
+    /// The right-click menu of a secret or a selection, while it is open.
+    secret_menu: Option<SecretMenu>,
+    /// The Edit secret / New secret dialog.
+    secret_edit: Option<SecretEdit>,
+    /// Reveal all asks for the password first (Basic only).
+    reveal_check: Option<PasswordCheck>,
+    /// A paste the detector changed, until the text edit has inserted it.
+    paste: Option<PendingPaste>,
+    /// The message after masking (with Undo), bottom right.
+    toast: Option<Toast>,
 }
 
 impl Drop for EditorState {
@@ -201,6 +219,113 @@ impl Drop for SpellMenu {
         }
     }
 }
+
+/// Secrets showing their value: by index in the note, until an egui time.
+/// All of them hide when the tab changes or the window loses focus.
+#[derive(Default)]
+struct Reveals {
+    note: Option<Uuid>,
+    until: Vec<(usize, f64)>,
+    /// Reveal all (Basic, after the password).
+    all: bool,
+}
+
+impl Reveals {
+    fn hide_all(&mut self) {
+        self.until.clear();
+        self.all = false;
+    }
+
+    fn shown(&self) -> (bool, Vec<usize>) {
+        (self.all, self.until.iter().map(|(i, _)| *i).collect())
+    }
+
+    fn is_shown(&self, i: usize) -> bool {
+        self.all || self.until.iter().any(|(j, _)| *j == i)
+    }
+
+    fn show(&mut self, i: usize, until: f64) {
+        self.until.retain(|(j, _)| *j != i);
+        self.until.push((i, until));
+    }
+
+    fn toggle(&mut self, i: usize, until: f64) {
+        if self.until.iter().any(|(j, _)| *j == i) {
+            self.until.retain(|(j, _)| *j != i);
+        } else {
+            self.show(i, until);
+        }
+    }
+}
+
+struct SecretMenu {
+    pos: Pos2,
+    note: Uuid,
+    /// The secret right-clicked (its index), or `None` for the selection.
+    target: Option<usize>,
+    has_selection: bool,
+}
+
+struct SecretEdit {
+    note: Uuid,
+    /// The secret being edited (its index), or `None` for a new one.
+    target: Option<usize>,
+    /// Where a new secret goes (char index).
+    at: usize,
+    value: SecretField,
+    /// The current value was put in the field.
+    loaded: bool,
+    error: Option<&'static str>,
+}
+
+struct PendingPaste {
+    kind: Pasted,
+    original: String,
+    inserted: String,
+}
+
+impl Drop for PendingPaste {
+    fn drop(&mut self) {
+        self.original.zeroize();
+        self.inserted.zeroize();
+    }
+}
+
+/// Undo for the paste detector: put `replacement` back where `inserted` is.
+struct Undo {
+    note: Uuid,
+    chars: (usize, usize),
+    inserted: String,
+    replacement: String,
+}
+
+impl Drop for Undo {
+    fn drop(&mut self) {
+        self.inserted.zeroize();
+        self.replacement.zeroize();
+    }
+}
+
+struct Toast {
+    text: String,
+    undo: Option<Undo>,
+    /// The first time the detector masks something, say why.
+    explain: bool,
+    left: f32,
+}
+
+impl Toast {
+    fn message(text: &str) -> Self {
+        Self {
+            text: text.to_owned(),
+            undo: None,
+            explain: false,
+            left: TOAST_SECONDS,
+        }
+    }
+}
+
+const TOAST_SECONDS: f32 = 6.0;
 
 /// How long the new-tab tip stays, in seconds (paused while hovered).
 const TIP_SECONDS: f32 = 5.0;
@@ -344,6 +469,23 @@ pub fn ui(ctx: &egui::Context, s: &mut Session, st: &mut EditorState, last_input
 
     language_picker(ctx, s, st);
     spell_menu(ctx, s, st);
+    secret_menu(ctx, s, st);
+    secret_edit(ctx, s, st);
+    if let Some(check) = st.reveal_check.as_mut() {
+        match check.ui(ctx, s) {
+            Outcome::Open => {}
+            Outcome::Canceled => {
+                st.reveal_check = None;
+                st.focus_editor = true;
+            }
+            Outcome::Confirmed => {
+                st.reveal_check = None;
+                st.reveals.all = true;
+                st.focus_editor = true;
+            }
+        }
+    }
+    toast(ctx, s, st);
     tab_menu(ctx, s, st);
     // Clear of the minimap, which shows where the matches are anyway.
     let right = if code_mode { MINIMAP_W + 16.0 } else { 24.0 };
@@ -357,6 +499,8 @@ pub fn ui(ctx: &egui::Context, s: &mut Session, st: &mut EditorState, last_input
         s.view_changed = true;
         st.picker = None;
         st.spell_menu = None;
+        st.secret_menu = None;
+        st.secret_edit = None;
     }
     action
 }
@@ -391,6 +535,10 @@ fn shortcuts(ctx: &egui::Context, s: &mut Session, st: &mut EditorState) -> Opti
         if i.consume_key(cmd_shift, Key::T) && content.reopen_last_closed().is_some() {
             st.focus_editor = true;
             changed = true;
+        }
+        if i.consume_key(cmd_shift, Key::H) {
+            st.mark_secret = true;
+            st.focus_editor = true;
         }
         if i.consume_key(cmd_shift, Key::M) {
             if let Some(n) = content.active_note.and_then(|id| content.note_mut(id)) {
@@ -588,8 +736,9 @@ fn chrome_button(ui: &mut Ui, text: &str, lock_icon: bool) -> egui::Response {
     resp
 }
 
+/// The tab title, secrets masked (DESIGN §11.1).
 fn tab_title(note: &Note) -> String {
-    let t = note.display_title();
+    let t = secret::mask(note.display_title());
     if t.is_empty() {
         return "Untitled".into();
     }
@@ -720,7 +869,7 @@ fn tabs(ui: &mut Ui, s: &mut Session, st: &mut EditorState, avail: f32) {
             resp.scroll_to_me(None);
             st.shown_tab = Some(id);
         }
-        resp.on_hover_text(note.display_title().chars().take(80).collect::<String>());
+        resp.on_hover_text(title_hover(note));
         rects.push((id, tab));
     }
 
@@ -812,6 +961,8 @@ const MINIMAP_CHAR: f32 = 1.2;
 fn text_area(ui: &mut Ui, s: &mut Session, st: &mut EditorState) {
     let ctx = ui.ctx().clone();
     let settings = s.vault.content.editor.clone();
+    let security = s.vault.content.security.clone();
+    let mut secret_tip_seen = false;
     let Some(active) = s.vault.content.active_note else {
         return;
     };
@@ -850,6 +1001,22 @@ fn text_area(ui: &mut Ui, s: &mut Session, st: &mut EditorState) {
         TabInsert::Spaces(n) => n as usize,
         TabInsert::Tab => 4,
     };
+
+    // Masked secrets (DESIGN §11.1): which ones show, for this tab only,
+    // while the window has focus.
+    let now = ctx.input(|i| i.time);
+    if st.reveals.note != Some(active) || !ctx.input(|i| i.focused) {
+        st.reveals.hide_all();
+        st.reveals.note = Some(active);
+    }
+    st.reveals.until.retain(|(_, t)| *t > now);
+    if let Some(next) = st.reveals.until.iter().map(|(_, t)| *t).reduce(f64::min) {
+        ctx.request_repaint_after(std::time::Duration::from_secs_f64((next - now).max(0.0)));
+    }
+    // Reveal all shows values in the text; one secret's Reveal shows it in
+    // a bubble, so the text (and the icon under the pointer) stays put.
+    let (all_shown, popped) = st.reveals.shown();
+    let is_revealed = |_: usize| all_shown;
 
     if std::mem::take(&mut st.focus_editor) {
         if st.restore_cursor {
@@ -906,6 +1073,41 @@ fn text_area(ui: &mut Ui, s: &mut Session, st: &mut EditorState) {
         }
     }
 
+    let has_focus = ctx.memory(|m| m.has_focus(id));
+    if std::mem::take(&mut st.mark_secret) {
+        inserted |= mark_secret(&ctx, id, note, st);
+    }
+    if has_focus {
+        let before = secrets::items(&note.body, &is_revealed);
+        if !before.is_empty() {
+            inserted |= delete_secret(&ctx, id, note, &before);
+        }
+        // The paste detector (§11.3) works on the text before egui inserts it.
+        ctx.input_mut(|i| {
+            for e in &mut i.events {
+                if let egui::Event::Paste(text) = e {
+                    let mut original = text.clone();
+                    match secrets::on_paste(text, settings.mask_pasted, code_mode) {
+                        Some(kind) => {
+                            st.paste = Some(PendingPaste {
+                                kind,
+                                original,
+                                inserted: text.clone(),
+                            })
+                        }
+                        None => original.zeroize(),
+                    }
+                }
+            }
+        });
+    }
+    // A right-click moves the caret in egui; keep the selection for the menu.
+    let kept_selection = ctx
+        .input(|i| i.pointer.button_pressed(egui::PointerButton::Secondary))
+        .then(|| egui::TextEdit::load_state(&ctx, id).and_then(|s| s.cursor.char_range()))
+        .flatten()
+        .filter(|r| r.primary != r.secondary);
+
     let char_w = ui.fonts(|f| f.glyph_width(&font, ' '));
     let digit_w = ui.fonts(|f| f.glyph_width(&font, '0'));
     let glyph_h = ui.fonts(|f| f.row_height(&font));
@@ -926,7 +1128,7 @@ fn text_area(ui: &mut Ui, s: &mut Session, st: &mut EditorState) {
     let highlight = &mut st.highlight;
     let mut layouter = |ui: &Ui, text: &str, wrap_width: f32| {
         let wrap_width = if wrap { wrap_width } else { f32::INFINITY };
-        let job = if code_mode {
+        let mut job = if code_mode {
             code_job(&highlight.spans_for(lang, text), text, &font, line_h, wrap_width)
         } else {
             let mut job = LayoutJob::simple(text.to_owned(), font.clone(), TEXT_BODY, wrap_width);
@@ -935,7 +1137,10 @@ fn text_area(ui: &mut Ui, s: &mut Session, st: &mut EditorState) {
             }
             job
         };
-        ui.fonts(|f| f.layout_job(job))
+        ui.fonts(|f| {
+            secrets::restyle(&mut job, f, &font, &is_revealed);
+            f.layout_job(job)
+        })
     };
 
     let mut scroll = if wrap {
@@ -980,7 +1185,71 @@ fn text_area(ui: &mut Ui, s: &mut Session, st: &mut EditorState) {
     st.offset = output.state.offset;
     let (below, output) = output.inner;
     let focused = output.response.has_focus() && ctx.input(|i| i.focused);
+    if let Some(range) = kept_selection {
+        let mut state = egui::TextEdit::load_state(&ctx, id).unwrap_or_default();
+        state.cursor.set_char_range(Some(range));
+        state.store(&ctx, id);
+    }
     let cursor_char = output.cursor_range.map(|r| r.primary.ccursor.index);
+
+    // A secret is one block: the caret never stops inside a masked one.
+    let items = secrets::items(&note.body, &is_revealed);
+    if let Some(range) = output
+        .cursor_range
+        .filter(|_| !items.is_empty() && kept_selection.is_none())
+    {
+        let (p, q) = (range.primary.ccursor.index, range.secondary.ccursor.index);
+        if let Some((p, q)) = secrets::fix_cursor(&items, p, q, st.caret.0 .0) {
+            let mut state = egui::TextEdit::load_state(&ctx, id).unwrap_or_default();
+            state
+                .cursor
+                .set_char_range(Some(CCursorRange::two(CCursor::new(q), CCursor::new(p))));
+            state.store(&ctx, id);
+            ctx.request_repaint();
+        }
+    }
+
+    // What the paste detector did, now that the text is in: offer Undo.
+    if let Some(p) = st.paste.take() {
+        if let Some(end) = cursor_char.filter(|_| output.response.changed()) {
+            let n = p.inserted.chars().count();
+            let start = end.saturating_sub(n);
+            let (a, b) = (char_to_byte(&note.body, start), char_to_byte(&note.body, end));
+            if end >= n && note.body.get(a..b) == Some(p.inserted.as_str()) {
+                let (text, replacement) = match p.kind {
+                    Pasted::Masked => (
+                        "Pasted text looks like a secret, so it was masked.".to_owned(),
+                        p.original.trim().to_owned(),
+                    ),
+                    Pasted::Secrets(n) => (
+                        if n == 1 {
+                            "1 pasted secret was masked.".to_owned()
+                        } else {
+                            format!("{n} pasted secrets were masked.")
+                        },
+                        secret::escape_all(&p.inserted),
+                    ),
+                };
+                let explain = p.kind == Pasted::Masked && settings.secret_tip;
+                secret_tip_seen |= explain;
+                st.toast = Some(Toast {
+                    text,
+                    undo: Some(Undo {
+                        note: active,
+                        chars: (start, end),
+                        inserted: p.inserted.clone(),
+                        replacement,
+                    }),
+                    explain,
+                    left: if explain {
+                        3.0 * TOAST_SECONDS
+                    } else {
+                        TOAST_SECONDS
+                    },
+                });
+            }
+        }
+    }
 
     let spans = if code_mode {
         st.highlight.spans.clone()
@@ -1003,6 +1272,13 @@ fn text_area(ui: &mut Ui, s: &mut Session, st: &mut EditorState) {
     };
     let lines = if numbers { view.lines() } else { Vec::new() };
     let rows = RowIndex::new(&output.galley);
+    let screen = secrets::Screen {
+        galley: &output.galley,
+        origin: output.galley_pos,
+        viewport,
+        glyph_h,
+        font: &font,
+    };
     let mut shapes = Vec::new();
     if code_mode {
         shapes.extend(view.current_line(&lines, viewport.x_range()));
@@ -1022,6 +1298,8 @@ fn text_area(ui: &mut Ui, s: &mut Session, st: &mut EditorState) {
             }
         }
     }
+
+    shapes.extend(screen.backgrounds(&items));
 
     // Find: every match, the current one brighter.
     if let Some(find) = &st.find {
@@ -1059,6 +1337,32 @@ fn text_area(ui: &mut Ui, s: &mut Session, st: &mut EditorState) {
         .painter()
         .with_clip_rect(viewport)
         .set(below, Shape::Vec(shapes));
+
+    // Reveal and Copy on each secret. Paranoid reveals only while held.
+    let hold = security.profile == Profile::Paranoid;
+    let popped: Vec<usize> = if all_shown { Vec::new() } else { popped };
+    screen.bubbles(ui, &note.body, &items, &popped);
+    for (i, event) in screen.icons(ui, id, &items, &popped, hold) {
+        // The click took focus from the text; give it back.
+        st.focus_editor = true;
+        match event {
+            IconEvent::Reveal if hold => {
+                st.reveals.show(i, now + 0.2);
+                ctx.request_repaint();
+            }
+            IconEvent::Reveal => st.reveals.toggle(i, now + secrets::REVEAL_SECONDS),
+            IconEvent::Copy => copy_secret(&ctx, &note.body, &items[i], &security),
+            IconEvent::Menu(pos) => {
+                st.spell_menu = None;
+                st.secret_menu = Some(SecretMenu {
+                    pos,
+                    note: active,
+                    target: Some(i),
+                    has_selection: false,
+                });
+            }
+        }
+    }
     if let Some(gutter) = gutter {
         view.gutter(ui, gutter, &lines, &font, code_mode);
     }
@@ -1096,9 +1400,11 @@ fn text_area(ui: &mut Ui, s: &mut Session, st: &mut EditorState) {
         }
     }
 
-    // Right-click on a misspelled word: suggestions.
-    if spell_on && output.response.secondary_clicked() {
+    // Right-click: a secret's menu; else a misspelled word's suggestions;
+    // else Mark as secret / Reveal all.
+    if output.response.secondary_clicked() {
         st.spell_menu = None;
+        st.secret_menu = None;
         if let Some(pos) = ctx.input(|i| i.pointer.interact_pos()) {
             let at = output
                 .galley
@@ -1106,8 +1412,17 @@ fn text_area(ui: &mut Ui, s: &mut Session, st: &mut EditorState) {
                 .ccursor
                 .index;
             let byte = char_to_byte(&note.body, at);
-            if let Some(m) = misses
+            let can_reveal_all = security.profile == Profile::Basic && !items.is_empty();
+            if let Some(i) = screen.at(&items, pos) {
+                st.secret_menu = Some(SecretMenu {
+                    pos,
+                    note: active,
+                    target: Some(i),
+                    has_selection: false,
+                });
+            } else if let Some(m) = misses
                 .iter()
+                .filter(|_| spell_on && kept_selection.is_none())
                 .find(|m| m.bytes.start <= byte && byte <= m.bytes.end)
             {
                 let word = note.body[m.bytes.clone()].to_owned();
@@ -1118,6 +1433,13 @@ fn text_area(ui: &mut Ui, s: &mut Session, st: &mut EditorState) {
                     bytes: m.bytes.clone(),
                     word,
                     suggestions,
+                });
+            } else if kept_selection.is_some() || can_reveal_all {
+                st.secret_menu = Some(SecretMenu {
+                    pos,
+                    note: active,
+                    target: None,
+                    has_selection: kept_selection.is_some(),
                 });
             }
         }
@@ -1156,6 +1478,117 @@ fn text_area(ui: &mut Ui, s: &mut Session, st: &mut EditorState) {
         note.modified = heimdall_core::content::now();
         s.touch(Some(active));
     }
+    if secret_tip_seen {
+        s.vault.content.editor.secret_tip = false;
+        s.touch(None);
+    }
+}
+
+/// The tab's tooltip: the whole title, secrets masked.
+fn title_hover(note: &Note) -> String {
+    secret::mask(note.display_title()).chars().take(80).collect()
+}
+
+/// Sorted char range of a text edit's selection, or of its caret.
+fn char_selection(ctx: &egui::Context, id: egui::Id, fallback: usize) -> (usize, usize) {
+    egui::TextEdit::load_state(ctx, id)
+        .and_then(|s| s.cursor.char_range())
+        .map(|r| {
+            let (a, b) = (r.primary.index, r.secondary.index);
+            (a.min(b), a.max(b))
+        })
+        .unwrap_or((fallback, fallback))
+}
+
+fn set_caret(ctx: &egui::Context, id: egui::Id, at: usize) {
+    let mut state = egui::TextEdit::load_state(ctx, id).unwrap_or_default();
+    state
+        .cursor
+        .set_char_range(Some(CCursorRange::one(CCursor::new(at))));
+    state.store(ctx, id);
+}
+
+/// Ctrl+Shift+H: the selection becomes a secret. With nothing selected, a
+/// dialog asks for a new one. Returns whether the text changed.
+fn mark_secret(ctx: &egui::Context, id: egui::Id, note: &mut Note, st: &mut EditorState) -> bool {
+    let (a, b) = char_selection(ctx, id, note.cursor as usize);
+    if a == b {
+        st.secret_edit = Some(SecretEdit {
+            note: note.id,
+            target: None,
+            at: a,
+            value: SecretField::default(),
+            loaded: false,
+            error: None,
+        });
+        return false;
+    }
+    let (start, end) = (char_to_byte(&note.body, a), char_to_byte(&note.body, b));
+    let selected = &note.body[start..end];
+    if selected.contains(secret::OPEN) {
+        st.toast = Some(Toast::message("The selection already has a secret in it."));
+        return false;
+    }
+    let Some(wrapped) = secret::wrap(selected) else {
+        st.toast = Some(Toast::message(
+            "A secret has to be one line and can't contain *}.",
+        ));
+        return false;
+    };
+    let at = a + wrapped.chars().count();
+    note.body.replace_range(start..end, &wrapped);
+    set_caret(ctx, id, at);
+    true
+}
+
+/// Backspace after a secret or Delete before it removes all of it, so its
+/// value never turns into plain text (DESIGN §11.1).
+fn delete_secret(ctx: &egui::Context, id: egui::Id, note: &mut Note, items: &[secrets::Item]) -> bool {
+    let (a, b) = char_selection(ctx, id, note.cursor as usize);
+    if a != b {
+        return false;
+    }
+    // Only the key event is touched inside `input_mut`: egui's context is
+    // locked there, and `set_caret` needs it too.
+    let delete = ctx.input_mut(|i| {
+        let pos = i.events.iter().position(|e| {
+            matches!(
+                e,
+                egui::Event::Key {
+                    key: Key::Backspace | Key::Delete,
+                    pressed: true,
+                    ..
+                }
+            )
+        })?;
+        let back = matches!(
+            i.events[pos],
+            egui::Event::Key {
+                key: Key::Backspace,
+                ..
+            }
+        );
+        let what = secrets::deletion(items, a, back)?;
+        i.events.remove(pos);
+        what
+    });
+    let Some((s, e)) = delete else {
+        return false;
+    };
+    let range = char_to_byte(&note.body, s)..char_to_byte(&note.body, e);
+    note.body.replace_range(range, "");
+    set_caret(ctx, id, s);
+    true
+}
+
+/// The value only, with the secret clipboard timer (DESIGN §11.2).
+fn copy_secret(ctx: &egui::Context, text: &str, item: &secrets::Item, security: &SecuritySettings) {
+    let value = &text[secret::value(&item.bytes)];
+    crate::support::copy_with_timer(
+        ctx,
+        value,
+        security.secret_clear_s.min(security.clipboard_clear_s),
+    );
 }
 
 const MATCH: egui::Color32 = egui::Color32::from_rgb(0x33, 0x33, 0x33);
@@ -1519,6 +1952,9 @@ impl CodeView<'_> {
         let first = (shift / MINIMAP_LINE) as usize;
         let count = (area.height() / MINIMAP_LINE).ceil() as usize + 1;
         let max_cols = (area.width() / MINIMAP_CHAR) as usize;
+        // Secrets are drawn six columns wide, like their dots.
+        let hidden = secret::scan(self.text).secrets;
+        let mut h = 0;
         let mut byte = 0;
         for (i, text) in self.text.split('\n').enumerate() {
             let start = byte;
@@ -1545,6 +1981,18 @@ impl CodeView<'_> {
             for (off, c) in text.char_indices() {
                 if col >= max_cols {
                     break;
+                }
+                let abs = start + off;
+                while hidden.get(h).is_some_and(|r| r.end <= abs) {
+                    h += 1;
+                }
+                if let Some(r) = hidden.get(h).filter(|r| r.start <= abs) {
+                    if abs == r.start {
+                        flush(run.take());
+                        flush(Some((col, 6.min(max_cols - col), Kind::Plain)));
+                        col += 6;
+                    }
+                    continue;
                 }
                 if c.is_whitespace() {
                     flush(run.take());
@@ -2097,9 +2545,15 @@ fn selection(ctx: &egui::Context, s: &Session) -> (Option<String>, usize) {
     if a == b {
         return (None, a);
     }
-    let text = &note.body[char_to_byte(&note.body, a)..char_to_byte(&note.body, b)];
+    let (start, end) = (char_to_byte(&note.body, a), char_to_byte(&note.body, b));
+    let text = &note.body[start..end];
     let short = b - a <= 200 && !text.contains('\n');
-    (short.then(|| text.to_owned()), a)
+    // A secret's value must not end up in the find field.
+    let secret = secret::scan(&note.body)
+        .secrets
+        .iter()
+        .any(|s| start < s.end && s.start < end);
+    ((short && !secret).then(|| text.to_owned()), a)
 }
 
 /// A note's selection as sorted char indices (equal when it is just the
@@ -2744,4 +3198,378 @@ fn shortcuts_link(ui: &mut Ui) -> egui::Response {
         ui.ctx().set_cursor_icon(CursorIcon::PointingHand);
     }
     resp
+}
+
+/// Right-click on a secret: Reveal, Copy, Edit, Unmask. On a selection:
+/// Mark as secret. In Basic: Reveal all (DESIGN §11.1).
+fn secret_menu(ctx: &egui::Context, s: &mut Session, st: &mut EditorState) {
+    let Some(menu) = st.secret_menu.as_ref() else {
+        return;
+    };
+    const W: f32 = 240.0;
+    let profile = s.vault.content.security.profile;
+    let Some(note) = s.vault.content.note(menu.note) else {
+        st.secret_menu = None;
+        return;
+    };
+    let items = secrets::items(&note.body, &|i| st.reveals.is_shown(i));
+    let mut close = ctx.input_mut(|i| i.consume_key(Modifiers::NONE, Key::Escape));
+    let mut chosen = None;
+    let area = egui::Area::new(egui::Id::new("secret_menu"))
+        .order(egui::Order::Foreground)
+        .fixed_pos(menu.pos + vec2(2.0, 2.0))
+        .constrain(true)
+        .show(ctx, |ui| {
+            popup_frame().show(ui, |ui| {
+                ui.set_width(W);
+                ui.spacing_mut().item_spacing.y = 0.0;
+                ui.add_space(6.0);
+                match menu.target {
+                    Some(i) => {
+                        let shown = st.reveals.is_shown(i);
+                        if profile != Profile::Paranoid {
+                            let label = if shown { "Hide" } else { "Reveal for 5 seconds" };
+                            if menu_row(ui, W, label, None, false).clicked() {
+                                chosen = Some(MenuChoice::Reveal);
+                            }
+                        }
+                        if menu_row(ui, W, "Copy", None, false).clicked() {
+                            chosen = Some(MenuChoice::Copy);
+                        }
+                        if menu_row(ui, W, "Edit secret…", None, false).clicked() {
+                            chosen = Some(MenuChoice::Edit);
+                        }
+                        ui.add_space(6.0);
+                        menu_divider(ui, W);
+                        ui.add_space(6.0);
+                        if menu_row(ui, W, "Unmask", None, false)
+                            .on_hover_text("Turn it back into plain text")
+                            .clicked()
+                        {
+                            chosen = Some(MenuChoice::Unmask);
+                        }
+                    }
+                    None => {
+                        if menu.has_selection
+                            && menu_row(ui, W, "Mark as secret", Some("Ctrl+Shift+H"), false).clicked()
+                        {
+                            chosen = Some(MenuChoice::Mark);
+                        }
+                        if profile == Profile::Basic && !items.is_empty() {
+                            let label = if st.reveals.all {
+                                "Hide all secrets"
+                            } else {
+                                "Reveal all secrets…"
+                            };
+                            if menu_row(ui, W, label, None, false).clicked() {
+                                chosen = Some(MenuChoice::RevealAll);
+                            }
+                        }
+                    }
+                }
+                ui.add_space(6.0);
+            });
+        });
+    if area.response.clicked_elsewhere() && !ctx.input(|i| i.pointer.secondary_clicked()) {
+        close = true;
+    }
+    if !close && chosen.is_none() {
+        return;
+    }
+    let Some(menu) = st.secret_menu.take() else {
+        return;
+    };
+    st.focus_editor = true;
+    let item = menu.target.and_then(|i| items.get(i).cloned());
+    let now = ctx.input(|i| i.time);
+    match (chosen, item) {
+        (Some(MenuChoice::Reveal), Some(_)) => {
+            if let Some(i) = menu.target {
+                st.reveals.toggle(i, now + secrets::REVEAL_SECONDS);
+            }
+        }
+        (Some(MenuChoice::Copy), Some(item)) => {
+            let security = s.vault.content.security.clone();
+            copy_secret(ctx, &note.body, &item, &security);
+        }
+        (Some(MenuChoice::Edit), Some(_)) => {
+            st.secret_edit = Some(SecretEdit {
+                note: menu.note,
+                target: menu.target,
+                at: 0,
+                value: SecretField::default(),
+                loaded: false,
+                error: None,
+            });
+        }
+        (Some(MenuChoice::Unmask), Some(item)) => {
+            let Some(note) = s.vault.content.note_mut(menu.note) else {
+                return;
+            };
+            let value = Zeroizing::new(note.body[secret::value(&item.bytes)].to_owned());
+            note.body.replace_range(item.bytes.clone(), &value);
+            note.modified = heimdall_core::content::now();
+            set_caret(
+                ctx,
+                egui::Id::new(("note", menu.note)),
+                item.chars.0 + value.chars().count(),
+            );
+            st.reveals.hide_all();
+            s.touch(Some(menu.note));
+        }
+        (Some(MenuChoice::Mark), _) => st.mark_secret = true,
+        (Some(MenuChoice::RevealAll), _) => {
+            if st.reveals.all {
+                st.reveals.hide_all();
+            } else {
+                st.reveal_check = Some(PasswordCheck::new(
+                    "Reveal all secrets?",
+                    "Every secret in this note shows until you switch tabs or leave the window. Anyone who can see your screen can read them.",
+                    "Reveal all",
+                    false,
+                ));
+            }
+        }
+        _ => {}
+    }
+}
+
+#[derive(Clone, Copy)]
+enum MenuChoice {
+    Reveal,
+    Copy,
+    Edit,
+    Unmask,
+    Mark,
+    RevealAll,
+}
+
+/// Edit secret / New secret: a masked field, so the value is never on
+/// screen unless the eye is clicked. What is pasted here is taken as is.
+fn secret_edit(ctx: &egui::Context, s: &mut Session, st: &mut EditorState) {
+    let Some(edit) = st.secret_edit.as_mut() else {
+        return;
+    };
+    let Some(note) = s.vault.content.note(edit.note) else {
+        st.secret_edit = None;
+        return;
+    };
+    let target = match edit.target {
+        Some(i) => match secret::scan(&note.body).secrets.get(i) {
+            Some(r) => Some(r.clone()),
+            None => {
+                st.secret_edit = None;
+                return;
+            }
+        },
+        None => None,
+    };
+    if !edit.loaded {
+        edit.loaded = true;
+        if let Some(r) = &target {
+            edit.value.text = note.body[secret::value(r)].to_owned();
+        }
+    }
+    const W: f32 = 380.0;
+    const FIELD: &str = "secret_value";
+    let mut save = false;
+    let mut cancel = false;
+    let modal = egui::Modal::new(egui::Id::new("secret_edit"))
+        .backdrop_color(egui::Color32::from_black_alpha(160))
+        .frame(
+            egui::Frame::NONE
+                .fill(BG)
+                .stroke(Stroke::new(1.0_f32, BORDER))
+                .corner_radius(CornerRadius::same(10))
+                .inner_margin(egui::Margin::same(28)),
+        )
+        .show(ctx, |ui| {
+            ui.set_width(W);
+            let title = if target.is_some() {
+                "Edit secret"
+            } else {
+                "New secret"
+            };
+            ui.label(egui::RichText::new(title).font(medium(18.0)).color(TEXT));
+            ui.add_space(8.0);
+            widgets::paragraph(ui, "Shown as dots in the note. One line.", W);
+            ui.add_space(16.0);
+            let resp = widgets::text_field(
+                ui,
+                egui::Id::new(FIELD),
+                &mut edit.value.text,
+                W,
+                Some(&mut edit.value.reveal),
+                "",
+            );
+            // Read Enter before taking focus back: Enter makes the field give
+            // up focus, and re-focusing it first would hide that.
+            save |= resp.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter));
+            if ui.memory(|m| m.focused().is_none()) {
+                resp.request_focus();
+            }
+            if let Some(e) = edit.error {
+                ui.add_space(10.0);
+                widgets::label(ui, e, 12.0, DANGER);
+            }
+            ui.add_space(24.0);
+            ui.horizontal(|ui| {
+                if widgets::button(ui, ButtonKind::Secondary, "Cancel", true, vec2(0.0, 40.0)).clicked() {
+                    cancel = true;
+                }
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    let ready = !edit.value.text.is_empty();
+                    if widgets::button(ui, ButtonKind::Primary, "Save", ready, vec2(0.0, 40.0)).clicked() {
+                        save = true;
+                    }
+                });
+            });
+        });
+    if modal.should_close() || cancel {
+        widgets::forget_fields(ctx, &[FIELD]);
+        st.secret_edit = None;
+        st.focus_editor = true;
+        return;
+    }
+    if !save || edit.value.text.is_empty() {
+        return;
+    }
+    let Some(wrapped) = secret::wrap(&edit.value.text) else {
+        edit.error = Some(if edit.value.text.contains('\n') {
+            "A secret has to be one line."
+        } else {
+            "A secret can't contain *}."
+        });
+        return;
+    };
+    let wrapped = Zeroizing::new(wrapped);
+    let (note_id, at) = (edit.note, edit.at);
+    st.secret_edit = None;
+    st.focus_editor = true;
+    widgets::forget_fields(ctx, &[FIELD]);
+    let Some(note) = s.vault.content.note_mut(note_id) else {
+        return;
+    };
+    let (start_char, range) = match target {
+        Some(r) => (note.body[..r.start].chars().count(), r),
+        None => {
+            let b = char_to_byte(&note.body, at);
+            (at, b..b)
+        }
+    };
+    note.body.replace_range(range, &wrapped);
+    note.modified = heimdall_core::content::now();
+    set_caret(
+        ctx,
+        egui::Id::new(("note", note_id)),
+        start_char + wrapped.chars().count(),
+    );
+    s.touch(Some(note_id));
+}
+
+/// Bottom right: what the paste detector did, with Undo; the first time,
+/// why (DESIGN §11.3). Also short messages about secrets.
+fn toast(ctx: &egui::Context, s: &mut Session, st: &mut EditorState) {
+    let Some(t) = st.toast.as_mut() else {
+        return;
+    };
+    let mut undo = false;
+    let mut dismiss = false;
+    let bottom = if s.vault.content.editor.status_bar {
+        50.0
+    } else {
+        20.0
+    };
+    let area = egui::Area::new(egui::Id::new("secret_toast"))
+        .order(egui::Order::Foreground)
+        .anchor(Align2::RIGHT_BOTTOM, vec2(-20.0, -bottom))
+        .show(ctx, |ui| {
+            popup_frame()
+                .inner_margin(egui::Margin {
+                    left: 16,
+                    right: 12,
+                    top: 12,
+                    bottom: 12,
+                })
+                .show(ui, |ui| {
+                    ui.set_width(330.0);
+                    ui.spacing_mut().item_spacing = vec2(8.0, 4.0);
+                    ui.horizontal_top(|ui| {
+                        ui.vertical(|ui| {
+                            ui.set_width(250.0);
+                            ui.add(
+                                egui::Label::new(
+                                    egui::RichText::new(&t.text)
+                                        .font(crate::theme::ui(13.0))
+                                        .color(TEXT),
+                                )
+                                .wrap(),
+                            );
+                            if t.explain {
+                                ui.add(
+                                    egui::Label::new(
+                                        egui::RichText::new(SECRET_TIP)
+                                            .font(crate::theme::ui(12.0))
+                                            .color(TEXT_MUTED),
+                                    )
+                                    .wrap(),
+                                );
+                            }
+                        });
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Min), |ui| {
+                            let (r, resp) = ui.allocate_exact_size(vec2(22.0, 22.0), Sense::click());
+                            if resp.hovered() {
+                                ui.painter().rect_filled(r, CornerRadius::same(4), BORDER);
+                                ui.ctx().set_cursor_icon(CursorIcon::PointingHand);
+                            }
+                            let color = if resp.hovered() { TEXT } else { TEXT_MUTED };
+                            widgets::icon_close(ui.painter(), r.center(), 8.0, color);
+                            dismiss |= resp.on_hover_text("Dismiss").clicked();
+                            if t.undo.is_some() {
+                                ui.add_space(4.0);
+                                undo |= widgets::link(ui, "Undo", 13.0).clicked();
+                            }
+                        });
+                    });
+                });
+        });
+    let hovered = ctx
+        .input(|i| i.pointer.hover_pos())
+        .is_some_and(|p| area.response.rect.contains(p));
+    if !hovered {
+        t.left -= ctx.input(|i| i.stable_dt).min(0.1);
+    }
+    if undo {
+        if let Some(u) = t.undo.take() {
+            undo_paste(ctx, s, u);
+        }
+        st.toast = None;
+        st.focus_editor = true;
+    } else if dismiss || t.left <= 0.0 {
+        st.toast = None;
+    } else {
+        ctx.request_repaint();
+    }
+}
+
+/// The first time the paste detector masks something (DESIGN §11.3).
+const SECRET_TIP: &str = "Heimdall masks pasted passwords, API keys and tokens so they don't sit in plain view. The value is still in the note: the eye shows it and the copy icon copies it. You can turn this off in Settings → Editor.";
+
+/// Puts the pasted text back as it was, if it is still there unchanged.
+fn undo_paste(ctx: &egui::Context, s: &mut Session, u: Undo) {
+    let Some(note) = s.vault.content.note_mut(u.note) else {
+        return;
+    };
+    let range = char_to_byte(&note.body, u.chars.0)..char_to_byte(&note.body, u.chars.1);
+    if note.body.get(range.clone()) != Some(u.inserted.as_str()) {
+        return;
+    }
+    note.body.replace_range(range, &u.replacement);
+    note.modified = heimdall_core::content::now();
+    set_caret(
+        ctx,
+        egui::Id::new(("note", u.note)),
+        u.chars.0 + u.replacement.chars().count(),
+    );
+    s.touch(Some(u.note));
 }

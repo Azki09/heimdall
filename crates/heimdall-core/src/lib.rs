@@ -11,6 +11,7 @@ pub mod error;
 pub mod format;
 pub mod keyfile;
 pub mod recovery;
+pub mod secret;
 pub mod storage;
 pub mod vault;
 

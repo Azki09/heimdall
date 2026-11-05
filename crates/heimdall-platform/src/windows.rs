@@ -12,9 +12,6 @@ use windows_sys::Win32::Storage::FileSystem::{
     BusTypeUsb, CreateFileW, GetDiskFreeSpaceExW, GetDriveTypeW, GetLogicalDrives, GetVolumeInformationW,
     FILE_SHARE_READ, FILE_SHARE_WRITE, OPEN_EXISTING,
 };
-use windows_sys::Win32::System::Diagnostics::Debug::{
-    SetErrorMode, SEM_FAILCRITICALERRORS, SEM_NOOPENFILEERRORBOX,
-};
 use windows_sys::Win32::System::Ioctl::{
     PropertyStandardQuery, StorageDeviceProperty, IOCTL_STORAGE_QUERY_PROPERTY, STORAGE_DEVICE_DESCRIPTOR,
     STORAGE_PROPERTY_QUERY,
@@ -23,13 +20,6 @@ use windows_sys::Win32::System::WindowsProgramming::{DRIVE_FIXED, DRIVE_REMOVABL
 use windows_sys::Win32::System::IO::DeviceIoControl;
 
 use crate::Drive;
-
-pub fn init() {
-    // SAFETY: takes and returns flags only.
-    unsafe {
-        SetErrorMode(SEM_FAILCRITICALERRORS | SEM_NOOPENFILEERRORBOX);
-    }
-}
 
 pub fn usb_drives() -> Vec<Drive> {
     let system = std::env::var("SystemDrive")

@@ -158,7 +158,12 @@ impl Speller {
         let mut misses = Vec::new();
         let mut chars = 0;
         let mut at = 0;
+        // Masked secrets are never checked (DESIGN §11.1).
+        let secrets = heimdall_core::secret::scan(text).secrets;
         for range in words(text) {
+            if secrets.iter().any(|s| range.start < s.end && s.start < range.end) {
+                continue;
+            }
             chars += text[at..range.start].chars().count();
             let word = &text[range.clone()];
             let len = word.chars().count();

@@ -12,8 +12,9 @@ use crate::format::SlotId;
 
 /// 2 added [`Content::access`] (v0.3); 3 added code mode per note,
 /// [`EditorSettings::code_tip`], the spell check language and the personal
-/// dictionary. Versions 1 and 2 are still read.
-pub const CONTENT_VERSION: u16 = 3;
+/// dictionary; 4 added the secret clipboard timer, locking with Windows and
+/// the paste detector settings (v0.4). Versions 1 to 3 are still read.
+pub const CONTENT_VERSION: u16 = 4;
 /// Plaintext is padded to a multiple of this (DESIGN §5.3).
 pub const PAD_BLOCK: usize = 4096;
 /// Notes stay in the trash this long before being purged (DESIGN §10.3).
@@ -44,8 +45,13 @@ pub struct SecuritySettings {
     /// `None` = never (only allowed in Basic).
     pub lock_after_s: Option<u32>,
     pub clipboard_clear_s: u32,
+    /// For copies that include a secret (DESIGN §11.2).
+    pub secret_clear_s: u32,
+    /// Only Basic can turn it off (§12).
     pub exclude_from_capture: bool,
     pub lock_on_minimize: bool,
+    /// Win+L. Always on in Hardened and Paranoid (§12).
+    pub lock_on_windows_lock: bool,
     pub remember_recent: bool,
 }
 
@@ -56,24 +62,30 @@ impl SecuritySettings {
                 profile,
                 lock_after_s: Some(10 * 60),
                 clipboard_clear_s: 30,
-                exclude_from_capture: false,
+                secret_clear_s: 10,
+                exclude_from_capture: true,
                 lock_on_minimize: false,
+                lock_on_windows_lock: true,
                 remember_recent: true,
             },
             Profile::Hardened => Self {
                 profile,
                 lock_after_s: Some(5 * 60),
                 clipboard_clear_s: 20,
+                secret_clear_s: 10,
                 exclude_from_capture: true,
                 lock_on_minimize: false,
+                lock_on_windows_lock: true,
                 remember_recent: false,
             },
             Profile::Paranoid => Self {
                 profile,
                 lock_after_s: Some(2 * 60),
                 clipboard_clear_s: 10,
+                secret_clear_s: 10,
                 exclude_from_capture: true,
                 lock_on_minimize: true,
+                lock_on_windows_lock: true,
                 remember_recent: false,
             },
         }
@@ -131,6 +143,10 @@ pub struct EditorSettings {
     pub zoom_percent: u16,
     /// Show the code mode tip on every new tab (§10.6).
     pub code_tip: bool,
+    /// Mask pasted text that looks like a secret (§11.3).
+    pub mask_pasted: bool,
+    /// Explain the paste detector the next time it masks something.
+    pub secret_tip: bool,
 }
 
 impl Default for EditorSettings {
@@ -149,6 +165,8 @@ impl Default for EditorSettings {
             reopen_tabs: true,
             zoom_percent: 100,
             code_tip: true,
+            mask_pasted: true,
+            secret_tip: true,
         }
     }
 }
@@ -260,7 +278,7 @@ impl Drop for Content {
     }
 }
 
-/// Layouts of versions 1 and 2, still read (DESIGN §5.3).
+/// Layouts of versions 1 to 3, still read (DESIGN §5.3).
 mod legacy {
     use super::*;
 
@@ -315,7 +333,7 @@ mod legacy {
         pub zoom_percent: u16,
     }
 
-    impl From<EditorSettingsV1> for EditorSettings {
+    impl From<EditorSettingsV1> for EditorSettingsV3 {
         fn from(e: EditorSettingsV1) -> Self {
             Self {
                 font: e.font,
@@ -335,10 +353,76 @@ mod legacy {
         }
     }
 
+    /// Security settings before version 4: no secret clipboard timer, no
+    /// locking with Windows.
+    #[derive(Serialize, Deserialize)]
+    pub(super) struct SecuritySettingsV1 {
+        pub profile: Profile,
+        pub lock_after_s: Option<u32>,
+        pub clipboard_clear_s: u32,
+        pub exclude_from_capture: bool,
+        pub lock_on_minimize: bool,
+        pub remember_recent: bool,
+    }
+
+    impl From<SecuritySettingsV1> for SecuritySettings {
+        /// Capture exclusion is turned on: Basic never offered the choice.
+        fn from(s: SecuritySettingsV1) -> Self {
+            Self {
+                profile: s.profile,
+                lock_after_s: s.lock_after_s,
+                clipboard_clear_s: s.clipboard_clear_s,
+                exclude_from_capture: true,
+                lock_on_minimize: s.lock_on_minimize,
+                remember_recent: s.remember_recent,
+                ..Self::defaults_for(s.profile)
+            }
+        }
+    }
+
+    /// Editor settings of version 3: no paste detector.
+    #[derive(Serialize, Deserialize)]
+    pub(super) struct EditorSettingsV3 {
+        pub font: Font,
+        pub font_size: u8,
+        pub tab_inserts: TabInsert,
+        pub line_ending: LineEnding,
+        pub word_wrap: bool,
+        pub line_numbers: bool,
+        pub status_bar: bool,
+        pub spell_check: bool,
+        pub spell_language: SpellLanguage,
+        pub autosave: bool,
+        pub reopen_tabs: bool,
+        pub zoom_percent: u16,
+        pub code_tip: bool,
+    }
+
+    impl From<EditorSettingsV3> for EditorSettings {
+        fn from(e: EditorSettingsV3) -> Self {
+            Self {
+                font: e.font,
+                font_size: e.font_size,
+                tab_inserts: e.tab_inserts,
+                line_ending: e.line_ending,
+                word_wrap: e.word_wrap,
+                line_numbers: e.line_numbers,
+                status_bar: e.status_bar,
+                spell_check: e.spell_check,
+                spell_language: e.spell_language,
+                autosave: e.autosave,
+                reopen_tabs: e.reopen_tabs,
+                zoom_percent: e.zoom_percent,
+                code_tip: e.code_tip,
+                ..Self::default()
+            }
+        }
+    }
+
     /// Version 1 (v0.1, v0.2): no access labels.
     #[derive(Serialize, Deserialize)]
     pub(super) struct ContentV1 {
-        pub security: SecuritySettings,
+        pub security: SecuritySettingsV1,
         pub editor: EditorSettingsV1,
         pub notes: Vec<NoteV1>,
         pub active_note: Option<Uuid>,
@@ -348,7 +432,7 @@ mod legacy {
     /// Version 2 (v0.3).
     #[derive(Serialize, Deserialize)]
     pub(super) struct ContentV2 {
-        pub security: SecuritySettings,
+        pub security: SecuritySettingsV1,
         pub editor: EditorSettingsV1,
         pub notes: Vec<NoteV1>,
         pub active_note: Option<Uuid>,
@@ -370,9 +454,21 @@ mod legacy {
         }
     }
 
+    /// Version 3 (code mode, spell check).
+    #[derive(Serialize, Deserialize)]
+    pub(super) struct ContentV3 {
+        pub security: SecuritySettingsV1,
+        pub editor: EditorSettingsV3,
+        pub notes: Vec<Note>,
+        pub active_note: Option<Uuid>,
+        pub trash: Vec<Note>,
+        pub access: Vec<AccessLabel>,
+        pub dictionary: Vec<String>,
+    }
+
     impl From<ContentV2> for Content {
         fn from(v2: ContentV2) -> Self {
-            Self {
+            ContentV3 {
                 security: v2.security,
                 editor: v2.editor.into(),
                 notes: v2.notes.into_iter().map(Note::from).collect(),
@@ -380,6 +476,21 @@ mod legacy {
                 trash: v2.trash.into_iter().map(Note::from).collect(),
                 access: v2.access,
                 dictionary: Vec::new(),
+            }
+            .into()
+        }
+    }
+
+    impl From<ContentV3> for Content {
+        fn from(v3: ContentV3) -> Self {
+            Self {
+                security: v3.security.into(),
+                editor: v3.editor.into(),
+                notes: v3.notes,
+                active_note: v3.active_note,
+                trash: v3.trash,
+                access: v3.access,
+                dictionary: v3.dictionary,
             }
         }
     }
@@ -535,6 +646,7 @@ impl Content {
         let (content, rest) = match version {
             1 => postcard::take_from_bytes::<legacy::ContentV1>(rest).map(|(c, r)| (Content::from(c), r)),
             2 => postcard::take_from_bytes::<legacy::ContentV2>(rest).map(|(c, r)| (Content::from(c), r)),
+            3 => postcard::take_from_bytes::<legacy::ContentV3>(rest).map(|(c, r)| (Content::from(c), r)),
             CONTENT_VERSION => postcard::take_from_bytes::<Content>(rest),
             other => return Err(Error::UnsupportedContentVersion(other)),
         }
@@ -595,6 +707,17 @@ mod tests {
         }
     }
 
+    fn old_security(s: &SecuritySettings) -> legacy::SecuritySettingsV1 {
+        legacy::SecuritySettingsV1 {
+            profile: s.profile,
+            lock_after_s: s.lock_after_s,
+            clipboard_clear_s: s.clipboard_clear_s,
+            exclude_from_capture: s.exclude_from_capture,
+            lock_on_minimize: s.lock_on_minimize,
+            remember_recent: s.remember_recent,
+        }
+    }
+
     fn old_editor(e: &EditorSettings) -> legacy::EditorSettingsV1 {
         legacy::EditorSettingsV1 {
             font: e.font,
@@ -643,10 +766,10 @@ mod tests {
         ));
 
         let mut plain = c.to_padded_plaintext().unwrap().to_vec();
-        plain[4] = 4; // version varint
+        plain[4] = 5; // version varint
         assert!(matches!(
             Content::from_padded_plaintext(&plain),
-            Err(Error::UnsupportedContentVersion(4))
+            Err(Error::UnsupportedContentVersion(5))
         ));
 
         assert!(Content::from_padded_plaintext(&[0; 10]).is_err());
@@ -657,7 +780,7 @@ mod tests {
     fn reads_version_1() {
         let c = sample();
         let v1 = legacy::ContentV1 {
-            security: c.security.clone(),
+            security: old_security(&c.security),
             editor: old_editor(&c.editor),
             notes: c.notes.iter().map(old_note).collect(),
             active_note: c.active_note,
@@ -675,7 +798,7 @@ mod tests {
         c.set_label(SlotId([7; 8]), "KINGSTON", 5);
         c.close_note(c.notes[0].id, 9);
         let v2 = legacy::ContentV2 {
-            security: c.security.clone(),
+            security: old_security(&c.security),
             editor: old_editor(&c.editor),
             notes: c.notes.iter().map(old_note).collect(),
             active_note: c.active_note,
@@ -700,6 +823,50 @@ mod tests {
             CONTENT_VERSION
         );
         assert_eq!(Content::from_padded_plaintext(&again).unwrap(), c);
+    }
+
+    /// A vault saved by v0.3.x with code mode opens with capture exclusion
+    /// on (Basic never offered it) and the v0.4 defaults.
+    #[test]
+    fn reads_version_3() {
+        let mut c = sample_v3();
+        c.security = SecuritySettings::defaults_for(Profile::Basic);
+        let mut old = old_security(&c.security);
+        old.exclude_from_capture = false;
+        old.clipboard_clear_s = 60;
+        let e = &c.editor;
+        let v3 = legacy::ContentV3 {
+            security: old,
+            editor: legacy::EditorSettingsV3 {
+                font: e.font,
+                font_size: e.font_size,
+                tab_inserts: e.tab_inserts,
+                line_ending: e.line_ending,
+                word_wrap: e.word_wrap,
+                line_numbers: e.line_numbers,
+                status_bar: e.status_bar,
+                spell_check: e.spell_check,
+                spell_language: e.spell_language,
+                autosave: e.autosave,
+                reopen_tabs: e.reopen_tabs,
+                zoom_percent: e.zoom_percent,
+                code_tip: e.code_tip,
+            },
+            notes: c.notes.clone(),
+            active_note: c.active_note,
+            trash: c.trash.clone(),
+            access: c.access.clone(),
+            dictionary: c.dictionary.clone(),
+        };
+        let plain = padded(3, &postcard::to_allocvec(&v3).unwrap());
+        let read = Content::from_padded_plaintext(&plain).unwrap();
+        c.security.clipboard_clear_s = 60;
+        assert_eq!(read, c);
+        assert!(read.security.exclude_from_capture);
+        assert!(read.security.lock_on_windows_lock);
+        assert_eq!(read.security.secret_clear_s, 10);
+        assert!(read.editor.mask_pasted && read.editor.secret_tip);
+        assert!(!read.editor.code_tip);
     }
 
     #[test]

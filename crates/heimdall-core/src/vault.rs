@@ -242,6 +242,13 @@ impl Vault {
         &self.vault_id
     }
 
+    /// Where the Master Key lives (address, length), so the app can keep
+    /// that memory out of the page file (DESIGN §12). Not the key itself.
+    pub fn key_memory(&self) -> (usize, usize) {
+        let mk = self.mk.expose_secret();
+        (mk.as_ptr() as usize, mk.len())
+    }
+
     /// A second copy of the open vault, MK included. Access changes run
     /// Argon2id several times; the app runs them on a copy in a background
     /// thread and swaps it in when done, so the window never freezes.

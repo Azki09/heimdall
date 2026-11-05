@@ -1682,6 +1682,7 @@ dependencies = [
  "eframe",
  "heimdall-core",
  "heimdall-platform",
+ "raw-window-handle",
  "rfd",
  "spellbook",
  "uuid",

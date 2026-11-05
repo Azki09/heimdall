@@ -1,6 +1,10 @@
 //! Finding text in a note (Ctrl+F) and in every note (Ctrl+Shift+F),
 //! DESIGN §10.5. Plain substring search; "Match case" off folds each
-//! character to lower case one-to-one, so positions stay exact.
+//! character to lower case one-to-one, so positions stay exact. Masked
+//! secrets are never searched, so a secret can't be guessed letter by
+//! letter (§11.1).
+
+use heimdall_core::secret;
 
 /// Stop after this many matches in one note.
 pub const MAX_MATCHES: usize = 10_000;
@@ -21,8 +25,18 @@ fn fold(c: char, match_case: bool) -> char {
     }
 }
 
-/// Every non-overlapping occurrence of `needle` in `text`, in order.
+/// Every non-overlapping occurrence of `needle` in `text`, in order,
+/// except those that touch a secret.
 pub fn find_all(text: &str, needle: &str, match_case: bool) -> Vec<Match> {
+    let mut found = find_plain(text, needle, match_case);
+    let secrets = secret::scan(text).secrets;
+    if !secrets.is_empty() {
+        found.retain(|m| !secrets.iter().any(|s| m.bytes.0 < s.end && s.start < m.bytes.1));
+    }
+    found
+}
+
+fn find_plain(text: &str, needle: &str, match_case: bool) -> Vec<Match> {
     let needle: Vec<char> = needle.chars().map(|c| fold(c, match_case)).collect();
     if needle.is_empty() {
         return Vec::new();
@@ -89,6 +103,7 @@ pub struct Preview {
 /// Show at most this much of a line around a match.
 const PREVIEW_CHARS: usize = 80;
 
+/// The line around a match, its secrets masked (DESIGN §11.1).
 pub fn preview(text: &str, m: &Match) -> Preview {
     let line_start = text[..m.bytes.0].rfind('\n').map_or(0, |i| i + 1);
     let line_end = text[m.bytes.0..].find('\n').map_or(text.len(), |i| m.bytes.0 + i);
@@ -102,17 +117,33 @@ pub fn preview(text: &str, m: &Match) -> Preview {
     while start < m.bytes.0 && text[start..].starts_with([' ', '\t']) {
         start += 1;
     }
-    let end = text[start..line_end]
+    let mut end = text[start..line_end]
         .char_indices()
         .nth(PREVIEW_CHARS)
         .map_or(line_end, |(b, _)| start + b)
         .max(match_end);
+    // Never cut a secret in two: half of one would not be masked.
+    for s in secret::scan(&text[line_start..line_end]).secrets {
+        let (a, b) = (line_start + s.start, line_start + s.end);
+        if a < start && start < b {
+            start = a;
+        }
+        if a < end && end < b {
+            end = b;
+        }
+    }
     let prefix = if skip > 0 { "…" } else { "" };
     let suffix = if end < line_end { "…" } else { "" };
+    let before = secret::mask(&text[start..m.bytes.0]);
+    let after = secret::mask(&text[match_end..end]);
+    let hit = &text[m.bytes.0..match_end];
     Preview {
         line,
-        text: format!("{prefix}{}{suffix}", &text[start..end]),
-        highlight: (prefix.len() + m.bytes.0 - start, prefix.len() + match_end - start),
+        text: format!("{prefix}{before}{hit}{after}{suffix}"),
+        highlight: (
+            prefix.len() + before.len(),
+            prefix.len() + before.len() + hit.len(),
+        ),
     }
 }
 
@@ -161,6 +192,18 @@ mod tests {
         assert_eq!(last_before(&m, 2), Some(0));
         assert_eq!(last_before(&m, 0), Some(2));
         assert_eq!(last_before(&[], 0), None);
+    }
+
+    #[test]
+    fn secrets_are_not_searched_or_shown() {
+        let text = "pw {*hunter2*} hunter2 {*x*}";
+        let m = find_all(text, "hunter", true);
+        assert_eq!(m.len(), 1);
+        assert_eq!(m[0].bytes.0, 15);
+        assert!(find_all(text, "{*", true).is_empty());
+        let p = preview(text, &m[0]);
+        assert_eq!(p.text, "pw •••••• hunter2 ••••••");
+        assert_eq!(&p.text[p.highlight.0..p.highlight.1], "hunter");
     }
 
     #[test]

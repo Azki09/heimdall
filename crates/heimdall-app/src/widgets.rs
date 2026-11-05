@@ -574,3 +574,19 @@ pub fn icon_trash(painter: &Painter, center: Pos2, color: Color32) {
 pub fn dot(painter: &Painter, center: Pos2, color: Color32) {
     painter.circle_filled(center, 3.0, color);
 }
+
+/// Two overlapping sheets: Copy.
+pub fn icon_copy(painter: &Painter, center: Pos2, color: Color32) {
+    let s = Stroke::new(1.2_f32, color);
+    let back = Rect::from_center_size(center + vec2(-1.5, -1.5), vec2(8.0, 9.0));
+    let front = back.translate(vec2(3.0, 3.0));
+    painter.add(egui::Shape::line(
+        vec![
+            pos2(back.left(), front.top() - 0.5),
+            back.left_top(),
+            pos2(front.right() - 0.5, back.top()),
+        ],
+        s,
+    ));
+    painter.rect_stroke(front, CornerRadius::same(1), s, StrokeKind::Middle);
+}

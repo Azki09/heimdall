@@ -213,12 +213,14 @@ Contenido {
         perfil: Básico | Reforzado | Paranoico,
         bloqueo_inactividad_s, portapapeles_s,
         excluir_capturas, bloquear_al_minimizar,
+        portapapeles_secretos_s, bloquear_con_windows,   // versión 4
         ... (ver §6)
     },
     notas: [Nota],          // en el orden de las pestañas
     nota_activa: uuid,      // pestaña seleccionada al cerrar
     papelera: [Nota],       // notas cerradas, ver §10.3
     diccionario: [String],  // palabras de "Add to dictionary" (§10.8); versión 3
+    // versión 4: el editor agrega enmascarar_pegados y aviso_secretos (§11.3)
 }
 
 Nota {
@@ -255,7 +257,7 @@ Decisiones que este documento dejaba abiertas y que el código fija:
 | Argon2id del slot de recuperación | m = 64 MiB, t = 2, p = 4 |
 | Entrada del KDF de recuperación | Los 16 bytes de entropía, no el texto de las palabras. Mayúsculas, espacios o comas no importan |
 | Contenido en claro | `longitud (u32) ‖ postcard(version_contenido) ‖ postcard(Contenido) ‖ ceros` hasta múltiplo de 4 KiB. Se rechaza si el relleno no es todo ceros |
-| Versión del contenido | 2 desde la v0.3: agrega `accesos: [ {slot_id, nombre, fecha} ]` al final de `Contenido`. La versión 1 se sigue leyendo y se guarda como 2. **3** desde el modo código (§10.6): cada `Nota` agrega `codigo` y `ajuste_linea`, y los ajustes del editor agregan `code_tip`. Las versiones 1 y 2 se siguen leyendo y se guardan como 3 |
+| Versión del contenido | 2 desde la v0.3: agrega `accesos: [ {slot_id, nombre, fecha} ]` al final de `Contenido`. La versión 1 se sigue leyendo y se guarda como 2. **3** desde el modo código (§10.6): cada `Nota` agrega `codigo` y `ajuste_linea`, y los ajustes del editor agregan `code_tip`. Las versiones 1 y 2 se siguen leyendo y se guardan como 3. **4** desde la v0.4 (§11, §12): la configuración agrega `portapapeles_secretos_s` y `bloquear_con_windows`, y los ajustes del editor agregan `mask_pasted` y `secret_tip`. Al leer una versión anterior, la exclusión de capturas se enciende en todos los perfiles (en Basic nunca se pudo elegir) |
 | Keyfile `.bifrost` | `"HMKF" ‖ vault_id (16 B) ‖ secreto (32 B)` = 52 B |
 | Slots de tipo desconocido | Se conservan intactos en guardados normales; al rotar la MK se descartan, porque no se pueden re-envolver |
 | Verificación antes de cambiar accesos | Toda operación sobre los slots (cambiar contraseña, agregar USB, rotar) comprueba primero la contraseña contra un slot existente, para que un error de tecleo nunca deje al usuario fuera |
@@ -273,7 +275,11 @@ Decisiones que este documento dejaba abiertas y que el código fija:
 | Modo presencia | Opcional (se puede activar luego) | ✅ Activo | ✅ Activo |
 | Bloqueo por inactividad | 10 min | 5 min | 2 min |
 | Autoborrado del portapapeles | 30 s | 20 s | 10 s |
-| Exclusión de capturas de pantalla | Opcional | ✅ | ✅ |
+| Autoborrado del portapapeles con secretos (§11.2) | 10 s | 10 s | 10 s |
+| Exclusión de capturas de pantalla | ✅ (se puede apagar, §12) | ✅ | ✅ |
+| Bloquear al bloquear Windows | ✅ (se puede apagar) | ✅ | ✅ |
+| Reveal de un secreto (§11.1) | 5 s | 5 s | Mantener presionado |
+| *Reveal all* | Con contraseña | ❌ | ❌ |
 | Argon2id (memoria) | 256 MiB | 256 MiB | 512 MiB+ |
 | Bloquear al minimizar | ❌ | Opcional | ✅ |
 | Recordar vaults recientes | ✅ | ❌ | ❌ |
@@ -292,7 +298,10 @@ Los valores de la tabla son **predeterminados**, no fijos. El usuario puede camb
 | Autoborrado del portapapeles | 10, 20, 30, 60 s |
 | Bloquear al minimizar | Sí / No |
 | Recordar vaults recientes (*Remember recent vaults*) | Sí / No |
-| Bloquear al bloquear Windows / al suspender | Siempre activo, no configurable |
+| Autoborrado del portapapeles con secretos | 5, 10, 20, 30 s |
+| Exclusión de capturas (*Hide window from screenshots*) | Solo en Basic: apagarla pide confirmar con aviso y contraseña (§12) |
+| Bloquear al bloquear Windows (*Lock when Windows locks*) | Solo en Basic: Sí / No |
+| Bloquear al suspender | Siempre activo, no configurable |
 
 **Recordar vaults recientes.** La lista de vaults recientes de *Welcome* vive fuera de cualquier vault, en la configuración de la app, y en claro: revela que una vault existe y dónde está. Por eso:
 - Predeterminado: **Sí** en Basic, **No** en Hardened y Paranoid. Cambiarlo marca el perfil como *Custom*, igual que los otros ajustes.
@@ -523,10 +532,47 @@ Lo buscado vive solo en memoria y se borra (zeroize) al cerrar la barra, el pane
 
 ## 11. Funciones del editor relacionadas con seguridad
 
-- **Secretos enmascarados:** sintaxis `{{secreto}}` o un botón "marcar como secreto". Se muestra como `••••••` con dos íconos de línea monocromos: **Reveal** (mostrar 5 s) y **Copy** (copiar con autoborrado).
-- **Detector de secretos:** al pegar algo con forma de contraseña o API key, sugiere enmascararlo.
-- **Portapapeles:** autoborrado según el perfil. Solo se borra si el contenido sigue siendo el que copió la app. Todo lo que copia la app se marca para que Windows no lo guarde en el historial del portapapeles (Win+V) ni lo sincronice con la nube.
-- **Títulos de pestaña:** si la primera línea contiene un secreto enmascarado, el título lo muestra enmascarado también.
+Diseño cerrado el 2026-10-30 (v0.4).
+
+### 11.1 Secretos enmascarados
+
+- **Sintaxis `{*secreto*}`** en el texto de la nota. También se marca con clic derecho → *Mark as secret* o con **Ctrl+Shift+H**, que envuelven la selección en `{* *}`. No cambia el formato del archivo: el secreto es texto normal con delimitadores.
+- **Por qué `{* *}`:** apertura y cierre distintos, así un delimitador perdido no empareja mal el resto de la nota. Casi no aparece en código ni en Markdown. Se descartaron `{{ }}` (Jinja, Handlebars, Vue), `[[ ]]`, `<< >>`, `~~ ~~` y `|| ||` (el operador OR).
+- **Funciona en notas normales y en modo código.**
+- **Reglas:**
+  - Una sola línea. El contenido no puede estar vacío ni tener saltos de línea.
+  - Cierra el primer `*}` después de `{*`.
+  - Si falta el cierre, todo queda como texto normal.
+  - `\{*` escribe el delimitador tal cual: se muestra `{*`, sin la barra y sin enmascarar.
+- **Cómo se ve:** un **rectángulo liso** de otro tono (sin puntos), siempre del mismo ancho, sin importar el largo. A su **derecha, fuera del rectángulo**, dos íconos de línea monocromos: **Reveal** y **Copy**, que **solo se ven con el cursor encima** del secreto (su espacio queda reservado para que el texto no se mueva). El ancho no revela la longitud. (En títulos, búsqueda y minimapa sigue mostrándose como `••••••`.)
+- **Clic derecho** sobre el rectángulo o sobre sus íconos abre el menú del secreto.
+- **Se comporta como un bloque:** el cursor lo salta, Backspace (al final) y Supr (al inicio) lo borran completo, y una selección que lo toca a medias se extiende para cubrirlo entero.
+- **Editar:** clic derecho → *Edit secret* abre un campo enmascarado con el valor. Lo que se pega en ese campo se toma tal cual. También se puede editar mientras está revelado.
+- **Reveal:** muestra el valor 5 s en una **burbuja flotante** encima del secreto (debajo si está en la primera línea visible). El texto no se reacomoda, así que los íconos no se mueven bajo el cursor; un segundo clic lo oculta. En **Paranoid** solo mientras se mantiene presionado el ícono. Todo vuelve a enmascararse cuando la ventana pierde el foco o al cambiar de pestaña.
+- **Reveal all** (clic derecho): solo en **Basic** y pide la contraseña. Es el único caso en que los valores se muestran dentro del texto. Muestra los secretos de la nota hasta que la ventana pierde el foco o se cambia de pestaña.
+- **Copy:** copia solo el valor, sin delimitadores.
+- **Búsqueda:** Ctrl+F y Ctrl+Shift+F no buscan dentro de los secretos (si lo hicieran, se podría adivinar un secreto letra por letra) y los resultados los muestran enmascarados.
+- **Corrector ortográfico:** ignora los secretos.
+- **Títulos de pestaña:** si el título contiene un secreto, se muestra enmascarado. Lo mismo en el minimapa del modo código.
+
+### 11.2 Copiar y portapapeles
+
+- **Ctrl+C** de una selección con secretos copia el texto real, con los delimitadores: pegado en Heimdall vuelve a quedar enmascarado; pegado fuera se ve la clave.
+- **Toda copia que incluya un secreto** (Ctrl+C con secretos o el ícono Copy) usa el temporizador **"Clear secrets from clipboard after"**: **10 s** en los tres perfiles, configurable (5, 10, 20, 30 s). Si el temporizador normal es más corto, se usa ese.
+- Solo se borra si el portapapeles sigue teniendo lo que copió la app. Todo lo que copia la app se marca para que Windows no lo guarde en el historial (Win+V) ni lo sincronice con la nube.
+
+### 11.3 Detector de secretos al pegar
+
+- **Enmascara automáticamente** lo que parece un secreto, en los tres perfiles: claves con prefijos conocidos (`sk-`, `ghp_`, `github_pat_`, `xox?-`, `AKIA`, `AIza`, `glpat-`), JWT (`eyJ…`), y cadenas de una sola palabra de 16 a 128 caracteres con al menos dos dígitos, mezcla de mayúsculas/minúsculas o símbolos, sin palabras largas en minúsculas y con entropía ≥ 3 bits por carácter. Nunca algo con espacios, una URL ni una ruta.
+  - **En modo código** solo cuentan los prefijos conocidos y los JWT: el código está lleno de identificadores largos con dígitos.
+- Muestra un toast **"Pasted text looks like a secret, so it was masked — Undo"**. Undo lo deja como texto normal.
+- **La primera vez** que actúa, el toast dura más y explica por qué se enmascaró. Solo sale una vez (como el aviso del modo código).
+- **Si lo pegado ya trae `{*…*}`**, se enmascara y se muestra "N pasted secrets were masked." con Undo. Undo los escapa (`\{*`).
+- Se puede apagar en *Settings → Editor → Mask pasted secrets*.
+- Arrastrar y soltar texto todavía no pasa por el detector (egui no lo permite dentro de un `TextEdit`).
+
+### 11.4 Otros
+
 - **Sin archivos temporales en claro**, sin autoguardado en texto plano, sin "documentos recientes" de Windows.
 - **Cero red:** la app no hace ninguna conexión. Las actualizaciones se revisan manualmente en GitHub.
 
@@ -535,10 +581,14 @@ Lo buscado vive solo en memoria y se borra (zeroize) al cerrar la barra, el pane
 ## 12. Endurecimiento del proceso (Windows)
 
 - `zeroize` en todos los buffers con secretos. Uso de `secrecy::SecretBox` para la MK.
-- `VirtualLock` sobre la memoria de claves (evita el archivo de paginación).
-- Desactivar los crash dumps del proceso (`SetErrorMode`, exclusión de WER).
-- `SetWindowDisplayAffinity(WDA_EXCLUDEFROMCAPTURE)` según el perfil.
-- Escuchar `WTS_SESSION_LOCK` y `PBT_APMSUSPEND` para bloquear la vault.
+- **`VirtualLock`** sobre la página de la MK (evita el archivo de paginación). Siempre, en todos los perfiles.
+- **Sin crash dumps:** `SetErrorMode(SEM_NOGPFAULTERRORBOX)` y un filtro de excepciones que termina el proceso al instante, antes de que Windows Error Reporting lo vea. Siempre. No se usa `WerAddExcludedApplication` porque escribe una entrada en el registro con el nombre de la app ("no trace").
+- **Exclusión de capturas** (`SetWindowDisplayAffinity(WDA_EXCLUDEFROMCAPTURE)`): **encendida en los tres perfiles**. Solo en Basic se puede apagar, en *Settings → Security*, después de un aviso y con la contraseña. El aviso explica que con la exclusión encendida la ventana sale en negro al compartir pantalla (Zoom, Teams) y en las capturas propias. Sin vault abierta (Welcome, Unlock, asistente) siempre está encendida.
+- **Bloqueo automático:**
+  - Al suspender (`PBT_APMSUSPEND`): siempre.
+  - Al bloquear Windows (`WTS_SESSION_LOCK`, Win+L): siempre en Hardened y Paranoid. En Basic es un ajuste (*Lock when Windows locks*), encendido por defecto.
+  - Los mensajes se reciben subclasificando la ventana de `eframe` (`SetWindowLongPtrW(GWLP_WNDPROC)` + `CallWindowProcW`, sin depender de comctl32), porque `eframe` no los expone. `WTSRegisterSessionNotification` activa los avisos de bloqueo.
+- **Solo en builds de depuración**, la variable de entorno `HEIMDALL_ALLOW_CAPTURE` desactiva la exclusión de capturas para poder probar la interfaz con capturas de pantalla. En release no existe.
 
 > Nota: el texto de las notas vive en los buffers del editor (`egui`), que no siempre se pueden bloquear ni borrar con precisión. Al bloquear, se descartan todos los buffers de texto y se borran las copias que controla la app. Es una protección de mejor esfuerzo, coherente con §2.
 
@@ -575,7 +625,7 @@ heimdall/
 | **v0.4 — Pulido** | Secretos enmascarados, detector de secretos, exclusión de capturas, endurecimiento del proceso |
 | **v0.5 — Confianza** | Fuzzing, CI con `cargo-audit`/`cargo-deny`, releases firmados, `SECURITY.md` |
 | **v1.1** | YubiKey/FIDO2 |
-| **Futuro** | Shamir 2-de-3, Linux/macOS |
+| **Futuro** | Shamir 2-de-3, Linux/macOS, **menú contextual general** (clic derecho con Cut / Copy / Paste / Select all en cualquier parte del texto; hoy el clic derecho solo abre menú sobre un secreto, una palabra mal escrita, una selección o, en Basic, *Reveal all*) |
 
 ### 14.1 Estado (2026-10-29)
 
@@ -640,6 +690,15 @@ Pendiente de la v0.3:
 - **Probar con un USB real**: detección, etiqueta, tamaño y retiro físico.
 - **`WM_DEVICECHANGE`** como detector principal del retiro.
 - *Hide window from screenshots* y *Lock when Windows locks or sleeps* (mockup Settings) siguen en la v0.4.
+
+- **v0.4 — en curso (2026-10-30).** Diseño cerrado: §11 (secretos, portapapeles, detector al pegar) y §12 (endurecimiento). Contenido versión 4 (§5.5). Orden: endurecimiento → secretos → detector.
+  - **Hecho y probado a mano (debug):** exclusión de capturas y su ajuste en Basic con contraseña; bloqueo al bloquear Windows y al suspender (mensajes simulados); `VirtualLock` y filtro de excepciones; secretos enmascarados con ancho constante, salto del cursor, borrado en bloque, Reveal 5 s, Copy con autoborrado a 10 s, menú contextual (Reveal, Copy, Edit secret…, Unmask, Mark as secret, Reveal all con contraseña), Ctrl+Shift+H, títulos de pestaña y búsqueda enmascarados; detector al pegar con aviso la primera vez y Undo (también para texto con `{*…*}`).
+  - **Falta probar:** Win+L y suspensión reales, mantener para revelar en Paranoid, el build release a mano.
+
+Decisiones tomadas al implementar la v0.4:
+- **El ancho enmascarado es constante:** el valor se dibuja con una fuente de 0,2 px y transparente, y el `{*` recibe el espaciado que falta para que todos los secretos midan lo mismo (iconos + seis puntos). Los puntos y los iconos se pintan encima.
+- **Ctrl+F, Ctrl+Shift+F y el corrector ignoran los secretos**; la búsqueda no rellena el campo con una selección que toque un secreto; el minimapa dibuja cada secreto como seis columnas.
+- **Undo del detector** solo actúa si el texto pegado sigue igual en su sitio; si no, no hace nada.
 
 - **Modo código (§10.6) — hecho (2026-10-29), sin commit todavía.** Contenido versión 3. Probado a mano con una vault nueva y con una vault versión 2 creada con el código anterior.
 

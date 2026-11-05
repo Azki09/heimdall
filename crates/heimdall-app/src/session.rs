@@ -70,7 +70,15 @@ impl Session {
             access_changed: false,
         };
         s.update_presence(ctx);
+        s.lock_key_memory();
         s
+    }
+
+    /// Keeps the Master Key out of the page file (DESIGN §12). Call again
+    /// whenever `vault` is replaced.
+    pub fn lock_key_memory(&self) {
+        let (address, len) = self.vault.key_memory();
+        heimdall_platform::lock_memory(address, len);
     }
 
     /// Starts or stops presence mode after the slots changed: it is on

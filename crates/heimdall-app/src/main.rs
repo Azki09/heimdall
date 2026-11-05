@@ -6,6 +6,7 @@ mod chrome;
 mod code;
 mod screens;
 mod search;
+mod secrets;
 mod session;
 mod spell;
 mod support;

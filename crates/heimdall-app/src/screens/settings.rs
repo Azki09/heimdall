@@ -11,6 +11,7 @@ use uuid::Uuid;
 use crate::app::Action;
 use crate::chrome;
 use crate::screens::access::Access;
+use crate::screens::confirm::{Outcome, PasswordCheck};
 use crate::session::Session;
 use crate::support::{duration_label, RecentVaults};
 use crate::theme::*;
@@ -38,6 +39,8 @@ pub struct Settings {
     page: Page,
     confirm: Option<Confirm>,
     access: Access,
+    /// Turning off "Hide window from screenshots" asks for the password.
+    capture_check: Option<PasswordCheck>,
 }
 
 impl Settings {
@@ -61,6 +64,7 @@ impl Settings {
         // An open dropdown takes Escape first: it only closes the dropdown.
         if !locked_in
             && self.confirm.is_none()
+            && self.capture_check.is_none()
             && !ctx.memory(|m| m.any_popup_open())
             && ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape))
         {
@@ -122,7 +126,9 @@ impl Settings {
                             return;
                         }
                         match self.page {
-                            Page::Security => security(ui, s, recent, &mut self.access),
+                            Page::Security => {
+                                security(ui, s, recent, &mut self.access, &mut self.capture_check)
+                            }
                             Page::Access => self.access.page(ui, s),
                             Page::Editor => editor(ui, s),
                             Page::Shortcuts => shortcuts(ui),
@@ -134,6 +140,17 @@ impl Settings {
 
         self.confirm_dialog(ctx, s);
         self.access.dialog_ui(ctx, s);
+        if let Some(check) = self.capture_check.as_mut() {
+            match check.ui(ctx, s) {
+                Outcome::Open => {}
+                Outcome::Canceled => self.capture_check = None,
+                Outcome::Confirmed => {
+                    self.capture_check = None;
+                    s.vault.content.security.exclude_from_capture = false;
+                    s.touch(None);
+                }
+            }
+        }
         action
     }
 
@@ -387,7 +404,13 @@ fn combo<T: PartialEq + Copy>(ui: &mut Ui, id: &str, value: &mut T, options: &[(
     changed
 }
 
-fn security(ui: &mut Ui, s: &mut Session, recent: &mut RecentVaults, access: &mut Access) {
+fn security(
+    ui: &mut Ui,
+    s: &mut Session,
+    recent: &mut RecentVaults,
+    access: &mut Access,
+    capture_check: &mut Option<PasswordCheck>,
+) {
     widgets::heading(ui, "Security");
     ui.add_space(24.0);
     let sec = s.vault.content.security.clone();
@@ -498,8 +521,61 @@ fn security(ui: &mut Ui, s: &mut Session, recent: &mut RecentVaults, access: &mu
         },
     );
 
+    let secret_opts: Vec<(u32, String)> = [5, 10, 20, 30].iter().map(|&x| (x, format!("{x} s"))).collect();
+    setting_row(
+        ui,
+        "Clear secrets from clipboard after",
+        Some(("For copies that include a masked secret.", TEXT_MUTED)),
+        |ui| {
+            changed |= combo(ui, "secret_clip", &mut sec.secret_clear_s, &secret_opts);
+        },
+    );
+
     setting_row(ui, "Lock when minimized", None, |ui| {
         changed |= widgets::toggle(ui, &mut sec.lock_on_minimize).changed();
+    });
+
+    // Basic can turn these off; the other profiles always have them (§12).
+    let basic = sec.profile == Profile::Basic;
+    setting_row(
+        ui,
+        "Lock when Windows locks",
+        Some(("Going to sleep always locks.", TEXT_MUTED)),
+        |ui| {
+            if basic {
+                changed |= widgets::toggle(ui, &mut sec.lock_on_windows_lock).changed();
+            } else {
+                widgets::label(ui, "Always on", 13.0, TEXT_MUTED);
+            }
+        },
+    );
+    let capture_note = if sec.exclude_from_capture {
+        (
+            "Screenshots, recordings and screen sharing show this window black.",
+            TEXT_MUTED,
+        )
+    } else {
+        ("Screenshots and screen sharing can show your notes.", DANGER)
+    };
+    setting_row(ui, "Hide window from screenshots", Some(capture_note), |ui| {
+        if !basic {
+            widgets::label(ui, "Always on", 13.0, TEXT_MUTED);
+            return;
+        }
+        let mut on = sec.exclude_from_capture;
+        if widgets::toggle(ui, &mut on).changed() {
+            if on {
+                sec.exclude_from_capture = true;
+                changed = true;
+            } else {
+                *capture_check = Some(PasswordCheck::new(
+                    "Show this window in screenshots?",
+                    "Screenshots, screen recordings and screen sharing (Zoom, Teams…) will be able to capture your notes, and so will any app that records the screen. While it's on, Heimdall shows black in them, in your own screenshots too.",
+                    "Turn off",
+                    true,
+                ));
+            }
+        }
     });
 
     let mut remember_changed = false;
@@ -646,6 +722,15 @@ fn editor(ui: &mut Ui, s: &mut Session) {
         )),
         |ui| changed |= widgets::toggle(ui, &mut e.code_tip).changed(),
     );
+    setting_row(
+        ui,
+        "Mask pasted secrets",
+        Some((
+            "Pasted passwords, API keys and tokens become {*secrets*}, shown as dots. Undo right after pasting keeps them plain.",
+            TEXT_MUTED,
+        )),
+        |ui| changed |= widgets::toggle(ui, &mut e.mask_pasted).changed(),
+    );
     ui.add_space(12.0);
     widgets::label(ui, "Zoom: Ctrl + / Ctrl − / Ctrl 0.", 12.0, TEXT_FAINT);
 
@@ -730,7 +815,7 @@ fn shortcuts(ui: &mut Ui) {
     ui.add_space(6.0);
     /// What a row does, and its key combinations.
     type Row = (&'static str, &'static [&'static [&'static str]]);
-    let groups: [(&str, &[Row]); 4] = [
+    let groups: [(&str, &[Row]); 5] = [
         (
             "Tabs",
             &[
@@ -753,6 +838,13 @@ fn shortcuts(ui: &mut Ui) {
                 ("Find in this note", &[&["Ctrl", "F"]]),
                 ("Next / previous match", &[&["F3"], &["Shift", "F3"]]),
                 ("Find in all notes", &[&["Ctrl", "Shift", "F"]]),
+            ],
+        ),
+        (
+            "Secrets",
+            &[
+                ("Mark the selection as secret", &[&["Ctrl", "Shift", "H"]]),
+                ("Delete a secret · next to it", &[&["Backspace"], &["Delete"]]),
             ],
         ),
         (
