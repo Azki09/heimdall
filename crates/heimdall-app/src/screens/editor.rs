@@ -3306,14 +3306,11 @@ fn secret_menu(ctx: &egui::Context, s: &mut Session, st: &mut EditorState) {
             let Some(note) = s.vault.content.note_mut(menu.note) else {
                 return;
             };
-            let value = Zeroizing::new(note.body[secret::value(&item.bytes)].to_owned());
-            note.body.replace_range(item.bytes.clone(), &value);
+            let (body, end) = secret::unmask(&note.body, item.bytes.clone());
+            let caret = body[..end].chars().count();
+            drop(Zeroizing::new(std::mem::replace(&mut note.body, body)));
             note.modified = heimdall_core::content::now();
-            set_caret(
-                ctx,
-                egui::Id::new(("note", menu.note)),
-                item.chars.0 + value.chars().count(),
-            );
+            set_caret(ctx, egui::Id::new(("note", menu.note)), caret);
             st.reveals.hide_all();
             s.touch(Some(menu.note));
         }

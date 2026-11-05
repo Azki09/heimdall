@@ -1,6 +1,8 @@
 [workspace]
 resolver = "2"
 members = ["crates/heimdall-core", "crates/heimdall-platform", "crates/heimdall-app"]
+# Built with nightly by cargo-fuzz, outside the workspace.
+exclude = ["fuzz"]
 
 [workspace.package]
 version = "0.1.0"

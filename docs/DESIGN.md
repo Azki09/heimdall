@@ -691,14 +691,22 @@ Pendiente de la v0.3:
 - **`WM_DEVICECHANGE`** como detector principal del retiro.
 - *Hide window from screenshots* y *Lock when Windows locks or sleeps* (mockup Settings) siguen en la v0.4.
 
-- **v0.4 — en curso (2026-10-30).** Diseño cerrado: §11 (secretos, portapapeles, detector al pegar) y §12 (endurecimiento). Contenido versión 4 (§5.5). Orden: endurecimiento → secretos → detector.
+- **v0.4 — hecho (commit f9df3ae, 2026-11-05).** Diseño cerrado: §11 (secretos, portapapeles, detector al pegar) y §12 (endurecimiento). Contenido versión 4 (§5.5). Orden: endurecimiento → secretos → detector.
   - **Hecho y probado a mano (debug):** exclusión de capturas y su ajuste en Basic con contraseña; bloqueo al bloquear Windows y al suspender (mensajes simulados); `VirtualLock` y filtro de excepciones; secretos enmascarados con ancho constante, salto del cursor, borrado en bloque, Reveal 5 s, Copy con autoborrado a 10 s, menú contextual (Reveal, Copy, Edit secret…, Unmask, Mark as secret, Reveal all con contraseña), Ctrl+Shift+H, títulos de pestaña y búsqueda enmascarados; detector al pegar con aviso la primera vez y Undo (también para texto con `{*…*}`).
-  - **Falta probar:** Win+L y suspensión reales, mantener para revelar en Paranoid, el build release a mano.
+  - **Probado a mano por el usuario (2026-11-05):** USB real, Win+L y suspensión reales, mantener para revelar en Paranoid, build release.
 
 Decisiones tomadas al implementar la v0.4:
-- **El ancho enmascarado es constante:** el valor se dibuja con una fuente de 0,2 px y transparente, y el `{*` recibe el espaciado que falta para que todos los secretos midan lo mismo (iconos + seis puntos). Los puntos y los iconos se pintan encima.
+- **El ancho enmascarado es constante:** el valor se dibuja con una fuente de 0,2 px y transparente, y el `{*` recibe el espaciado que falta para que todos los secretos midan lo mismo (rectángulo + iconos). El rectángulo y los iconos se pintan encima.
 - **Ctrl+F, Ctrl+Shift+F y el corrector ignoran los secretos**; la búsqueda no rellena el campo con una selección que toque un secreto; el minimapa dibuja cada secreto como seis columnas.
 - **Undo del detector** solo actúa si el texto pegado sigue igual en su sitio; si no, no hace nada.
+- **Unmask cuida lo que queda alrededor** (encontrado con fuzzing, §14.1 v0.5): si el valor contiene `{*`, o forma uno con un `{` justo antes o con lo que sigue, ese `{*` se escapa para que no aparezca un secreto nuevo. Si el valor termina en `\` y justo después empieza otro secreto, se inserta un espacio: si no, la `\` escaparía al siguiente y lo dejaría visible.
+
+- **v0.5 — en curso (2026-11-05).**
+  - **CI** (`.github/workflows/ci.yml`), en cada push a `main` y en cada pull request: `cargo fmt --check`, clippy con `-D warnings`, tests y build release en Windows; `cargo-deny` (vulnerabilidades y crates sin mantenimiento de RustSec, licencias compatibles con GPL-3.0, solo crates.io) según `deny.toml`; y 60 s de fuzzing por objetivo. Dependabot revisa dependencias y actions cada semana.
+  - **Fuzzing** (`fuzz/`, cargo-fuzz): `vault_file`, `keyfile`, `content`, `recovery_code` y `secrets`. Cada objetivo comprueba además una propiedad (lo que se lee se vuelve a escribir byte por byte, Unmask quita exactamente un secreto…). Cada noche corre 15 min por objetivo con el corpus guardado (`.github/workflows/fuzz.yml`). El core expone `heimdall_core::fuzzing` solo con la feature `fuzzing`.
+  - **Encontrado por el fuzzing:** Unmask (y el Undo del detector) podía dejar un secreto nuevo, o dejar visible el siguiente. Corregido en `secret::unmask` y `secret::escape_all`.
+  - **Ignorados en `deny.toml`**, con su motivo: `paste` y `ttf-parser`, sin mantenimiento, vienen de egui 0.31; no son vulnerabilidades. Se quitan al actualizar egui.
+  - **Falta:** subir el repositorio a GitHub para que corra la CI, releases firmados, `SECURITY.md`.
 
 - **Modo código (§10.6) — hecho (2026-10-29), sin commit todavía.** Contenido versión 3. Probado a mano con una vault nueva y con una vault versión 2 creada con el código anterior.
 

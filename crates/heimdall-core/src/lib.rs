@@ -23,3 +23,21 @@ pub use keyfile::Keyfile;
 pub use recovery::RecoveryCode;
 pub use secrecy::SecretString;
 pub use vault::{LockedVault, NewVault, SlotInfo, UnlockMethod, Vault};
+
+/// Entry points for the fuzz targets in `fuzz/` that reach code the app
+/// only runs after decryption. Not part of the API.
+#[cfg(feature = "fuzzing")]
+#[doc(hidden)]
+pub mod fuzzing {
+    use crate::{Content, Result};
+
+    /// Decodes decrypted content (padding, version, every legacy layout).
+    pub fn content_from_plaintext(plain: &[u8]) -> Result<Content> {
+        Content::from_padded_plaintext(plain)
+    }
+
+    /// Encodes content the way it is encrypted.
+    pub fn content_to_plaintext(content: &Content) -> Result<Vec<u8>> {
+        content.to_padded_plaintext().map(|p| p.to_vec())
+    }
+}

@@ -1,0 +1,52 @@
+[package]
+name = "heimdall-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+license = "GPL-3.0-only"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+heimdall-core = { path = "../crates/heimdall-core", features = ["fuzzing"] }
+
+# Not part of the main workspace: it needs nightly and cargo-fuzz.
+[workspace]
+members = ["."]
+
+[[bin]]
+name = "vault_file"
+path = "fuzz_targets/vault_file.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "keyfile"
+path = "fuzz_targets/keyfile.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "content"
+path = "fuzz_targets/content.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "secrets"
+path = "fuzz_targets/secrets.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "recovery_code"
+path = "fuzz_targets/recovery_code.rs"
+test = false
+doc = false
+bench = false

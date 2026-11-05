@@ -98,17 +98,59 @@ pub fn wrap(value: &str) -> Option<String> {
 }
 
 /// Turns every secret of `text` into plain text by escaping its `{*`.
+///
+/// A value may hold a `{*` of its own (`{*a{*b*}c*}`), which becomes a
+/// secret once the outer one is escaped, so this repeats until none is
+/// left. Each pass escapes at least one, so it ends.
 pub fn escape_all(text: &str) -> String {
-    let scan = scan(text);
-    let mut out = String::with_capacity(text.len() + scan.secrets.len());
-    let mut at = 0;
-    for s in &scan.secrets {
-        out.push_str(&text[at..s.start]);
-        out.push('\\');
-        at = s.start;
+    let mut out = text.to_owned();
+    loop {
+        let scan = scan(&out);
+        if scan.secrets.is_empty() {
+            return out;
+        }
+        let mut next = String::with_capacity(out.len() + scan.secrets.len());
+        let mut at = 0;
+        for s in &scan.secrets {
+            next.push_str(&out[at..s.start]);
+            next.push('\\');
+            at = s.start;
+        }
+        next.push_str(&out[at..]);
+        out = next;
     }
-    out.push_str(&text[at..]);
-    out
+}
+
+/// `text` with the secret at `secret` (a range from [`scan`]) turned back
+/// into its plain value. A `{*` in the value, or one the value forms with
+/// what is around it (`{*a{*}*b*}`, or a `{` right before a value that
+/// starts with `*`), is escaped so no new secret appears. Returns the new
+/// text and the byte where the value now ends.
+pub fn unmask(text: &str, secret: Range<usize>) -> (String, usize) {
+    let v = value(&secret);
+    let mut out = String::with_capacity(text.len());
+    out.push_str(&text[..secret.start]);
+    out.push_str(&text[v.clone()]);
+    let mut end = secret.start + v.len();
+    // A value ending in `\` would escape a `{*` right after it, and so
+    // show the next secret. There is no way to write a plain `\` there,
+    // so a space keeps them apart.
+    if text[v.clone()].ends_with('\\') && text[secret.end..].starts_with(OPEN) {
+        out.push(' ');
+        end += 1;
+    }
+    out.push_str(&text[secret.end..]);
+    // A new `{*` can start one byte early (a `{` before the value).
+    let from = secret.start.saturating_sub(1);
+    while let Some(s) = scan(&out)
+        .secrets
+        .into_iter()
+        .find(|s| s.start >= from && s.start < end)
+    {
+        out.insert(s.start, '\\');
+        end += 1;
+    }
+    (out, end)
 }
 
 /// Prefixes of API keys and tokens that are secret by themselves.
@@ -241,6 +283,24 @@ mod tests {
         assert_eq!(mask(r"write \{*x*} for {*pw*}."), "write {*x*} for ••••••.");
         assert_eq!(escape_all("a {*b*} {*c*}"), r"a \{*b*} \{*c*}");
         assert!(scan(&escape_all("a {*b*} {*c*}")).secrets.is_empty());
+        // Unmask one: the value comes back, and nothing new gets masked.
+        assert_eq!(unmask("a {*pw*} b", 2..8), ("a pw b".to_owned(), 4));
+        let (text, end) = unmask("{*a{*}*b*}", 0..6);
+        assert_eq!((text.as_str(), end), (r"a\{*b*}", 3));
+        assert!(scan(&text).secrets.is_empty());
+        let (text, _) = unmask("x {*a{*b*} {*c*}", 2..10);
+        assert_eq!(secrets(&text), ["{*c*}"]);
+        // Found by fuzzing: the `{` before joins the value's first `*`.
+        let (text, _) = unmask("{{**{*{**}{~*}", 1..10);
+        assert!(scan(&text).secrets.is_empty(), "{text}");
+        // A value ending in `\` must not escape (and show) the next secret.
+        let (text, end) = unmask(r"{*pw\*}{*next*}", 0..7);
+        assert_eq!((text.as_str(), end), (r"pw\ {*next*}", 4));
+        assert_eq!(secrets(&text), ["{*next*}"]);
+        // A value holding `{*`: escaping the outer one must not expose it.
+        for text in ["{*a{*b*}c*}", "{*{*{*x*}", "{*x{*y*}*}"] {
+            assert!(scan(&escape_all(text)).secrets.is_empty(), "{text}");
+        }
     }
 
     #[test]

@@ -3,3 +3,9 @@
 *.heim.bak
 *.heim.tmp
 *.bifrost
+
+# cargo-fuzz output
+/fuzz/target
+/fuzz/corpus
+/fuzz/artifacts
+/fuzz/coverage

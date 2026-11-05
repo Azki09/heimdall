@@ -1,0 +1,57 @@
+# cargo-deny: what CI checks about dependencies (see .github/workflows/ci.yml).
+# Run locally with `cargo deny check`.
+
+[graph]
+# Heimdall only ships for Windows so far: check what that build pulls in.
+# (The GUI stack's Linux-only crates, such as zbus, are not shipped.)
+targets = ["x86_64-pc-windows-msvc"]
+all-features = true
+
+[advisories]
+# Any RustSec advisory (vulnerable, unmaintained, unsound, yanked) fails the
+# build. A known-harmless one goes in `ignore` with the reason next to it.
+version = 2
+yanked = "deny"
+ignore = [
+    # Both come from egui 0.31 (eframe -> accesskit_windows, epaint ->
+    # ab_glyph). "Unmaintained" is not a known vulnerability: `paste` is a
+    # compile-time macro and `ttf-parser` only reads the fonts bundled in the
+    # executable, never a file from outside. Drop these when egui moves on.
+    { id = "RUSTSEC-2024-0436", reason = "paste: build-time macro via egui/accesskit" },
+    { id = "RUSTSEC-2026-0192", reason = "ttf-parser: only parses bundled fonts, via egui" },
+]
+
+[licenses]
+# Everything must be compatible with Heimdall's GPL-3.0-only.
+version = 2
+confidence-threshold = 0.9
+allow = [
+    "GPL-3.0-only", # Heimdall itself
+    "MIT",
+    "Apache-2.0",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "BSL-1.0",
+    "CC0-1.0",
+    "ISC",
+    "MPL-2.0",
+    "Unicode-3.0",
+    "Unlicense",
+    "Zlib",
+    # egui's bundled default fonts (epaint_default_fonts)
+    "OFL-1.1",
+    "Ubuntu-font-1.0",
+]
+
+[bans]
+# Several versions of one crate only warn (the GUI stack has a few);
+# wildcard version requirements are refused.
+multiple-versions = "warn"
+wildcards = "deny"
+allow-wildcard-paths = true
+
+[sources]
+# Only crates.io: no git dependencies, no other registries.
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
