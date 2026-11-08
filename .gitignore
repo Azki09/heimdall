@@ -2,6 +2,7 @@
 *.heim
 *.heim.bak
 *.heim.tmp
+*.tmp
 *.bifrost
 # Except the test vaults that freeze the format (DESIGN 5.6). No real data.
 !/crates/heimdall-core/tests/fixtures/*.heim

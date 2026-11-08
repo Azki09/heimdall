@@ -24,6 +24,10 @@ impl KdfParams {
     }
 }
 
+/// How many slots of one kind (password, recovery) an unlock tries. Heimdall
+/// writes one of each; the rest of a crafted file is ignored.
+const MAX_SLOTS_TRIED: usize = 2;
+
 /// How the vault in memory was opened. After [`UnlockMethod::Recovery`] the
 /// app must force [`Vault::reset_access`] (DESIGN §7, §9 step 5).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -125,7 +129,9 @@ impl LockedVault {
                 _ => Error::NoUsableSlot,
             });
         }
-        for slot in password_slots {
+        // A real vault has one password slot. Trying a few at most keeps a
+        // crafted file (16 costly slots) from tying up the unlock.
+        for slot in password_slots.into_iter().take(MAX_SLOTS_TRIED) {
             let kek = slot_key(vault_id, slot, password.expose_secret().as_bytes(), None)?;
             if let Some(mk) = crypto::unwrap_key(&kek, &slot.nonce, &slot.wrapped_mk, &slot.aad(vault_id)) {
                 return self.finish(mk, UnlockMethod::Password { slot: slot.id });
@@ -140,7 +146,11 @@ impl LockedVault {
         let header = &self.file.header;
         let vault_id = &header.vault_id;
         let mut found = false;
-        for slot in header.known_slots().filter(|s| s.kind == SlotKind::Recovery) {
+        for slot in header
+            .known_slots()
+            .filter(|s| s.kind == SlotKind::Recovery)
+            .take(MAX_SLOTS_TRIED)
+        {
             found = true;
             let kek = crypto::argon2id(code.secret(), &slot.salt, slot.kdf)?;
             if let Some(mk) = crypto::unwrap_key(&kek, &slot.nonce, &slot.wrapped_mk, &slot.aad(vault_id)) {

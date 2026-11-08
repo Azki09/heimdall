@@ -240,7 +240,7 @@ Antes de cifrar, se rellena (padding) a múltiplos de 4 KiB para no revelar el t
 
 ### 5.4 Guardado atómico y `.bak`
 
-- Se escribe a `archivo.heim.tmp`, se hace `flush` + `fsync`, y luego se renombra sobre el original.
+- Se escribe a un archivo temporal nuevo junto al original, `archivo.heim.<aleatorio>.tmp` (creado con `create_new`: nunca trunca ni sigue un archivo o enlace que ya exista con ese nombre), se hace `flush` + `fsync`, y luego se renombra sobre el original.
 - En guardados normales se conserva `archivo.heim.bak` (la versión anterior, también cifrada) por si el archivo principal se corrompe.
 - **Cuando cambian los accesos** (cambio de contraseña, revocación, rotación de MK, regenerar el código), el `.bak` se **sobrescribe con la versión nueva**. Si no, seguiría abriéndose con la contraseña o el USB anteriores.
 - No se intenta "borrar de forma segura" el `.bak` viejo sobrescribiéndolo con ceros: en SSDs no está garantizado. El cifrado ya lo protege, y la rotación de la MK limita su alcance (§4.5).
@@ -256,7 +256,7 @@ Decisiones que este documento dejaba abiertas y que el código fija:
 |---|---|
 | Tamaño de los slots | Tipos 1 y 2: 108 B en total (`slot_len` = 105). Tipo 3: 116 B (`slot_len` = 113) |
 | Unidad de `kdf_m` | KiB (como en Argon2) |
-| Límites de Argon2id al leer | m entre 8 MiB y 2 GiB, t entre 1 y 16, p entre 1 y 16. Fuera de rango, el archivo se rechaza |
+| Límites de Argon2id al leer | m entre 8 MiB y 1 GiB, t entre 1 y 8, p entre 1 y 16. Fuera de rango, el archivo se rechaza. Heimdall nunca escribe más de 512 MiB y t = 3. Al abrir se prueban como mucho **2 slots de cada tipo** (contraseña, recuperación): una vault real tiene uno; así un archivo manipulado con 16 slots costosos no deja la apertura ocupada minutos (v1.0) |
 | Argon2id del slot de recuperación | m = 64 MiB, t = 2, p = 4 |
 | Entrada del KDF de recuperación | Los 16 bytes de entropía, no el texto de las palabras. Mayúsculas, espacios o comas no importan |
 | Contenido en claro | `longitud (u32) ‖ postcard(version_contenido) ‖ postcard(Contenido) ‖ ceros` hasta múltiplo de 4 KiB. Se rechaza si el relleno no es todo ceros |

@@ -67,10 +67,11 @@ impl KdfParams {
     };
 
     /// Hard limits enforced on every parsed slot, so a malicious file cannot
-    /// make us allocate absurd amounts of memory (DESIGN §5.2).
+    /// make us allocate absurd amounts of memory or keep an unlock busy for
+    /// minutes (DESIGN §5.2). Heimdall itself never goes past 512 MiB, t = 3.
     pub const MIN_M_KIB: u32 = 8 * 1024;
-    pub const MAX_M_KIB: u32 = 2 * 1024 * 1024;
-    pub const MAX_T: u32 = 16;
+    pub const MAX_M_KIB: u32 = 1024 * 1024;
+    pub const MAX_T: u32 = 8;
     pub const MAX_P: u8 = 16;
 
     pub fn validate(&self) -> Result<()> {

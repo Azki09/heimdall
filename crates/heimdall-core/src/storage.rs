@@ -39,7 +39,8 @@ pub fn backup_path(path: &Path) -> PathBuf {
 }
 
 /// Writes `bytes` to `path` so that `path` always holds either the old or
-/// the new complete version: write to `.tmp`, flush + fsync, rename over.
+/// the new complete version: write to a temporary file next to it, flush +
+/// fsync, rename over.
 pub fn save_vault(path: &Path, bytes: &[u8], kind: SaveKind) -> Result<()> {
     let bak = backup_path(path);
     match kind {
@@ -59,14 +60,19 @@ pub fn save_vault(path: &Path, bytes: &[u8], kind: SaveKind) -> Result<()> {
     Ok(())
 }
 
-/// Writes a whole file so that `path` never holds half of it: `.tmp`,
+/// Writes a whole file so that `path` never holds half of it: `<name>.<random>.tmp`,
 /// flush + fsync, rename over. For new files that are not the open vault
 /// (exports, backup copies, DESIGN §10.9); the vault itself goes through
 /// [`save_vault`].
 pub fn write_atomic(path: &Path, bytes: &[u8]) -> Result<()> {
-    let tmp = with_suffix(path, ".tmp");
+    // A fresh, random name opened with `create_new`: an existing file (or a
+    // link planted under a predictable name) is never truncated or followed.
+    let mut tag = [0u8; 6];
+    getrandom::fill(&mut tag).map_err(|_| Error::Rng)?;
+    let tag: String = tag.iter().map(|b| format!("{b:02x}")).collect();
+    let tmp = with_suffix(path, &format!(".{tag}.tmp"));
     let result = (|| {
-        let mut f = retry(|| File::create(&tmp))?;
+        let mut f = retry(|| File::options().write(true).create_new(true).open(&tmp))?;
         f.write_all(bytes)?;
         f.flush()?;
         f.sync_all()?;
@@ -120,6 +126,12 @@ fn with_suffix(path: &Path, suffix: &str) -> PathBuf {
 mod tests {
     use super::*;
 
+    fn no_tmp_left(dir: &Path) -> bool {
+        fs::read_dir(dir)
+            .unwrap()
+            .all(|e| !e.unwrap().file_name().to_string_lossy().ends_with(".tmp"))
+    }
+
     #[test]
     fn normal_save_keeps_previous_as_bak() {
         let dir = tempfile::tempdir().unwrap();
@@ -132,7 +144,7 @@ mod tests {
         save_vault(&p, b"v2", SaveKind::Normal).unwrap();
         assert_eq!(fs::read(&p).unwrap(), b"v2");
         assert_eq!(fs::read(backup_path(&p)).unwrap(), b"v1");
-        assert!(!with_suffix(&p, ".tmp").exists());
+        assert!(no_tmp_left(dir.path()));
     }
 
     #[test]
@@ -190,7 +202,7 @@ mod tests {
         );
         assert_eq!(fs::read(&p).unwrap(), b"v2");
         assert_eq!(fs::read(backup_path(&p)).unwrap(), b"v1");
-        assert!(!with_suffix(&p, ".tmp").exists());
+        assert!(no_tmp_left(dir.path()));
     }
 
     #[test]
@@ -207,7 +219,7 @@ mod tests {
         fs::set_permissions(&p, perm).unwrap();
         assert!(result.is_err());
         assert_eq!(fs::read(&p).unwrap(), b"v1");
-        assert!(!with_suffix(&p, ".tmp").exists());
+        assert!(no_tmp_left(dir.path()));
     }
 
     #[test]

@@ -74,15 +74,25 @@ pub fn file_stem(path: &Path) -> String {
         .unwrap_or_else(|| "vault".into())
 }
 
-/// The save dialog may return a name without the extension.
-pub fn with_extension(path: PathBuf, ext: &str) -> PathBuf {
+/// The save dialog may return a name without the extension, or with another
+/// one the user typed; the extension is then added here. Windows only asked
+/// about overwriting the name it returned, so a file that already exists
+/// under the new name is refused instead of being replaced without asking.
+pub fn with_extension(path: PathBuf, ext: &str) -> Result<PathBuf, String> {
     if path.extension().is_some_and(|e| e.eq_ignore_ascii_case(ext)) {
-        path
+        return Ok(path);
+    }
+    let mut s = path.into_os_string();
+    s.push(".");
+    s.push(ext);
+    let path = PathBuf::from(s);
+    if path.exists() {
+        Err(format!(
+            "{} already exists. Choose another name.",
+            file_name(&path)
+        ))
     } else {
-        let mut s = path.into_os_string();
-        s.push(".");
-        s.push(ext);
-        PathBuf::from(s)
+        Ok(path)
     }
 }
 
@@ -156,7 +166,13 @@ pub fn backup(s: &mut Session) {
     let Some(picked) = dialog.save_file() else {
         return;
     };
-    let target = with_extension(picked, "heim");
+    let target = match with_extension(picked, "heim") {
+        Ok(t) => t,
+        Err(e) => {
+            s.notify(e, true);
+            return;
+        }
+    };
     if is_vault_file(&target, &s.path) {
         s.notify("That is the vault itself. Choose another name or drive.", true);
         return;
@@ -508,7 +524,13 @@ impl ExportVault {
                 let Some(picked) = dialog.save_file() else {
                     return;
                 };
-                let picked = with_extension(picked, "heim");
+                let picked = match with_extension(picked, "heim") {
+                    Ok(p) => p,
+                    Err(e) => {
+                        self.error = Some(e);
+                        return;
+                    }
+                };
                 if is_vault_file(&picked, &s.path) {
                     self.error = Some("That is the vault that is open. Choose another name.".into());
                     return;
@@ -1105,7 +1127,13 @@ impl ExportText {
         if let Some(dir) = s.path.parent() {
             dialog = dialog.set_directory(dir);
         }
-        let path = with_extension(dialog.save_file()?, &ext);
+        let path = match with_extension(dialog.save_file()?, &ext) {
+            Ok(p) => p,
+            Err(e) => {
+                self.error = Some(e);
+                return None;
+            }
+        };
         if is_vault_file(&path, &s.path) {
             self.error = Some("That is the vault file. Choose another name.".into());
             return None;
