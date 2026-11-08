@@ -257,7 +257,7 @@ Decisiones que este documento dejaba abiertas y que el código fija:
 | Argon2id del slot de recuperación | m = 64 MiB, t = 2, p = 4 |
 | Entrada del KDF de recuperación | Los 16 bytes de entropía, no el texto de las palabras. Mayúsculas, espacios o comas no importan |
 | Contenido en claro | `longitud (u32) ‖ postcard(version_contenido) ‖ postcard(Contenido) ‖ ceros` hasta múltiplo de 4 KiB. Se rechaza si el relleno no es todo ceros |
-| Versión del contenido | 2 desde la v0.3: agrega `accesos: [ {slot_id, nombre, fecha} ]` al final de `Contenido`. La versión 1 se sigue leyendo y se guarda como 2. **3** desde el modo código (§10.6): cada `Nota` agrega `codigo` y `ajuste_linea`, y los ajustes del editor agregan `code_tip`. Las versiones 1 y 2 se siguen leyendo y se guardan como 3. **4** desde la v0.4 (§11, §12): la configuración agrega `portapapeles_secretos_s` y `bloquear_con_windows`, y los ajustes del editor agregan `mask_pasted` y `secret_tip`. Al leer una versión anterior, la exclusión de capturas se enciende en todos los perfiles (en Basic nunca se pudo elegir) |
+| Versión del contenido | 2 desde la v0.3: agrega `accesos: [ {slot_id, nombre, fecha} ]` al final de `Contenido`. La versión 1 se sigue leyendo y se guarda como 2. **3** desde el modo código (§10.6): cada `Nota` agrega `codigo` y `ajuste_linea`, y los ajustes del editor agregan `code_tip`. Las versiones 1 y 2 se siguen leyendo y se guardan como 3. **4** desde la v0.4 (§11, §12): la configuración agrega `portapapeles_secretos_s` y `bloquear_con_windows`, y los ajustes del editor agregan `mask_pasted` y `secret_tip`. Al leer una versión anterior, la exclusión de capturas se enciende en todos los perfiles (en Basic nunca se pudo elegir). **5** desde la v1.0 (§10.9): la configuración agrega `pedir_contraseña_al_exportar` (encendido) y `Contenido` agrega `ultimo_respaldo` (fecha o nada). Las versiones 1 a 4 se siguen leyendo y se guardan como 5 |
 | Keyfile `.bifrost` | `"HMKF" ‖ vault_id (16 B) ‖ secreto (32 B)` = 52 B |
 | Slots de tipo desconocido | Se conservan intactos en guardados normales; al rotar la MK se descartan, porque no se pueden re-envolver |
 | Verificación antes de cambiar accesos | Toda operación sobre los slots (cambiar contraseña, agregar USB, rotar) comprueba primero la contraseña contra un slot existente, para que un error de tecleo nunca deje al usuario fuera |
@@ -432,7 +432,8 @@ Todos los atajos aparecen en *Settings → Shortcuts*.
 - **Indicador de cambios:** un punto `•` en la pestaña con cambios sin guardar, igual que en el Bloc de notas.
 - **Restaurar sesión:** al abrir la vault, las pestañas aparecen en el mismo orden, con la misma pestaña activa y el cursor donde estaba. Todo eso vive dentro del contenido cifrado.
 - **Ancho de las pestañas:** todas miden lo mismo, 200 px si caben; con más pestañas se achican por igual hasta 96 px. El título se corta con "…" según el ancho, y el título completo aparece al pasar el ratón.
-- **Muchas pestañas:** si no caben, se desplazan horizontalmente y aparece un menú `⌄` con la lista completa. La pestaña activa siempre se desplaza hasta quedar a la vista.
+- **Muchas pestañas:** si no caben, se desplazan horizontalmente. El menú `⌄` (siempre visible desde la v1.0) tiene la lista completa. La pestaña activa siempre se desplaza hasta quedar a la vista.
+- **Clic derecho en una pestaña:** *Rename*, *Export this note…* (§10.9) y *Close tab*.
 
 ### 10.2 Autoguardado (cifrado)
 El Bloc de notas de Windows 11 no pierde lo que escribes. Aquí se hace lo mismo, pero **siempre cifrado**:
@@ -529,7 +530,7 @@ No hay plegado de código (*folding*).
 
 **En todas las notas (Ctrl+Shift+F).** Un panel en el mismo lugar, más ancho: campo, `Aa`, cerrar y un resumen ("7 results in 3 notes"). Los resultados se agrupan por nota (título y número de coincidencias), con una fila por coincidencia: número de línea y un fragmento de la línea con la coincidencia resaltada. Como máximo 20 filas por nota ("N more in this note"). Un clic abre la nota, selecciona la coincidencia y deja abierta la barra de Ctrl+F con la misma búsqueda. Solo busca en las pestañas abiertas; **la papelera no**.
 
-**Menú de pestañas.** Si las pestañas no caben, aparece un botón `⌄` después de ellas que lista todas (ícono `</>`, punto de cambios sin guardar, la activa marcada). Un clic cambia de pestaña.
+**Menú de pestañas.** Un botón `⌄` a la derecha de las pestañas lista todas (ícono `</>`, punto de cambios sin guardar, la activa marcada). Un clic cambia de pestaña. Hasta la v1.0 solo aparecía si las pestañas no cabían; desde la v1.0 está siempre, porque debajo de la lista tiene las acciones de exportar, importar y copia de respaldo (§10.9).
 
 Lo buscado vive solo en memoria y se borra (zeroize) al cerrar la barra, el panel o la vault.
 
@@ -542,6 +543,81 @@ Lo buscado vive solo en memoria y se borra (zeroize) al cerrar la barra, el pane
 - No se revisan: URLs, direcciones de correo, palabras con dígitos y siglas en mayúsculas (USB, API).
 - **Desactivado en modo código.**
 - Motor: `spellbook`, en Rust puro, sin red ni archivos.
+
+### 10.9 Exportar, importar y copia de respaldo
+
+Diseño cerrado el 2026-11-07 (v1.0). Son cinco acciones:
+
+| Acción | Dónde | Resultado |
+|---|---|---|
+| *Export notes…* | Menú `⌄` · clic derecho en una pestaña (*Export this note…*) · *Settings → Vault* | Un `.heim` **nuevo e independiente** con las notas elegidas y su propia contraseña |
+| *Import notes from vault…* | Menú `⌄` · *Settings → Vault* | Copia notas de otro `.heim` a esta vault |
+| *Export as plain text…* | Menú `⌄` · *Settings → Vault* | Un `.txt` (una nota) o un `.zip` (varias), **sin cifrar** |
+| *Import text files…* | Menú `⌄` · *Settings → Vault* | Cada archivo de texto se vuelve una nota |
+| *Save a backup copy…* | Menú `⌄` · *Settings → Vault* | Copia exacta del `.heim` a otro lugar |
+
+**El menú `⌄` se muestra siempre** (antes solo aparecía cuando las pestañas no cabían): arriba la lista de pestañas, debajo una línea y estas cinco acciones. **Clic derecho en una pestaña** abre un menú con *Rename*, *Export this note…* y *Close tab*.
+
+**Pedir la contraseña antes de exportar.** Las dos exportaciones sacan información de la vault, así que piden la contraseña actual primero (el mismo diálogo que *Reveal all*, §11.1). En Hardened y Paranoid siempre. En Basic se puede apagar con *Ask for password before exporting* (*Settings → Vault*, encendido por defecto); apagado, el perfil se muestra como "· Custom". La copia de respaldo y las importaciones no la piden: no sacan nada que no esté ya cifrado.
+
+#### Exportación cifrada (*Export notes…*)
+
+1. **Contraseña actual**, si corresponde (arriba).
+2. **Notas:** lista con casillas de todas las pestañas abiertas (la papelera no aparece), con la actual marcada, más *Select all* / *Select none*.
+3. **Contraseña nueva**, dos veces, con el mismo medidor y el mismo mínimo que al crear una vault (zxcvbn ≥ 2). Si es la misma que la de la vault actual, se avisa sin impedirlo: "This is the password of your current vault". Se comprueba contra los slots (como *Reveal all*), sin guardar la contraseña.
+4. **Dónde guardarlo:** el diálogo de Windows con `<vault>-export.heim` propuesto. Nunca la vault abierta ni su `.bak`. Si el archivo existe, Windows pide confirmar.
+5. **Código de recuperación** de la vault nueva, igual que en el asistente (copiar, imprimir y confirmar tres palabras), con un *Skip* bien visible. El archivo ya está escrito cuando se muestra el código, igual que en el asistente.
+
+Al terminar se vuelve a las notas y la barra de estado dice "Exported 3 notes to x-export.heim".
+
+Qué lleva el archivo:
+- **Sí:** título, texto, modo código y lenguaje, ajuste de línea y fechas de cada nota. Los secretos siguen enmascarados (`{*…*}`).
+- **No:** el diccionario personal, los accesos USB y sus etiquetas, los ajustes, la papelera ni la lista de las otras notas.
+- **Perfil Basic, solo contraseña**, para que quien lo reciba no necesite ningún USB. **Argon2id hereda los parámetros de la vault de origen** (el más costoso de sus slots de contraseña): exportar desde Paranoid da 512 MiB. La copia nunca es más fácil de atacar que el original.
+- Es una vault normal: se abre con *Open vault…*, tiene su código de recuperación y su propio `vault_id`. **No se agrega a *Recent vaults*.**
+- Se escribe de forma atómica (`.tmp` + renombrar, §5.4). Argon2id corre en un hilo aparte.
+
+#### Importar desde otra vault (*Import notes from vault…*)
+
+1. El diálogo de Windows para elegir un `.heim`. No puede ser la vault abierta.
+2. Su contraseña (y su USB si lo exige, con la misma fila *Key* que *Unlock*), o su código de recuperación.
+3. Lista con casillas de sus notas (sin su papelera), todas marcadas.
+4. Las notas elegidas se agregan **al final, como pestañas nuevas**, con un id nuevo. Si un título ya existe, se le agrega " (2)", " (3)"… El archivo de origen no se modifica ni se guarda.
+
+Sirve para cualquier vault, no solo para las exportadas. La vault de origen se borra de la memoria al terminar.
+
+#### Exportación en texto plano (*Export as plain text…*)
+
+1. **Advertencia primero**, antes de elegir nada: "Plain text files are not encrypted. Anyone with access to this computer, its backups or its cloud sync can read them." Hay que pulsar *I understand*.
+2. **Contraseña actual**, si corresponde.
+3. **Notas** (la misma lista con casillas) y **qué hacer con los secretos**:
+   - *Hide* (predeterminado): cada secreto se reemplaza por `[secret]`.
+   - *Keep markers*: salen tal cual, `{*valor*}`; el valor se lee, y al importarlo vuelve a quedar enmascarado.
+   - *Reveal*: el valor sale en claro, sin marcas.
+4. **Formato:** una nota → un archivo con su título como nombre: `.txt`, o `.md` si está en modo código Markdown, o la extensión de su lenguaje en modo código (`.rs`, `.py`…). Varias → un **`.zip`** con un archivo por nota. Los nombres se limpian (caracteres no válidos en Windows, nombres reservados como `CON`) y se numeran si se repiten. Sin título, "Untitled".
+5. El diálogo de Windows para guardar, y la barra de estado: "Exported 3 notes as plain text to x.zip".
+
+El texto se escribe en UTF-8, con el fin de línea del ajuste del editor (§10.4). El archivo queda fuera del control de Heimdall: OneDrive, el historial de archivos de Windows o la papelera pueden guardar copias. **No hay "borrado seguro"**: en un SSD no es confiable y daría una falsa garantía.
+
+#### Importar archivos de texto (*Import text files…*)
+
+- El diálogo de Windows con selección múltiple: `.txt`, `.md` y las extensiones de los lenguajes del modo código (§10.6).
+- Cada archivo se vuelve una nota nueva al final, con el nombre del archivo (con extensión) como título. Un archivo de código entra en modo código con su lenguaje; `.txt`, como nota normal.
+- Solo UTF-8 (se acepta y se quita el BOM). Un archivo que no es UTF-8 o que pasa de 10 MB se salta, y se dice cuál.
+- Un `{*valor*}` en el archivo queda como secreto, así que lo exportado con *Keep markers* vuelve igual.
+- La barra de estado lo recuerda: "Imported 2 files. The original files are still unencrypted on disk." Heimdall nunca toca los archivos originales.
+
+#### Copia de respaldo (*Save a backup copy…*)
+
+- Copia el `.heim` **tal cual**: la misma contraseña, los mismos USB y el mismo código de recuperación. No es una vault nueva. Antes se guardan los cambios pendientes, para que la copia esté al día.
+- El diálogo de Windows propone `<vault>-backup-2026-11-07.heim`. Nunca la vault misma, su `.bak` ni su `.tmp`.
+- Se escribe de forma atómica, **se vuelve a leer y se compara** byte a byte con el original (hay USB que no conservan lo escrito, §14.1). Si no coincide, se avisa y se borra la copia.
+- **Sin recordatorios.** Solo dos menciones discretas: una línea en el último paso del asistente ("Tip: use Save a backup copy… to keep a copy on another drive") y, en *Settings → Vault*, "Last backup: Nov 7, 2026" (o "Never") junto al botón. La fecha se guarda cifrada en el contenido.
+- Un respaldo viejo sigue abriendo con los accesos que tenía cuando se hizo: si después se revoca un USB o se cambia la contraseña, el respaldo no se entera. *Settings → Vault* lo dice debajo del botón.
+
+#### *Settings → Vault*
+
+Página nueva, entre *Access* y *Editor*: *Save a backup copy…* con la fecha del último respaldo; las cuatro acciones de exportar e importar; y *Ask for password before exporting* (en Hardened y Paranoid, "Always on").
 
 ---
 
@@ -640,7 +716,7 @@ heimdall/
 | **v0.4 — Pulido** | Secretos enmascarados, detector de secretos, exclusión de capturas, endurecimiento del proceso |
 | **v0.5 — Confianza** | Fuzzing, CI con `cargo-audit`/`cargo-deny`, releases firmados, `SECURITY.md` |
 | **v1.1** | YubiKey/FIDO2 |
-| **v1.0** | Formato congelado (§5.6), **menú contextual general** (clic derecho con Cut / Copy / Paste / Select all en cualquier parte del texto), copia de respaldo manual, exportar (cifrado y en texto plano) |
+| **v1.0** | Formato congelado (§5.6), **menú contextual general** (clic derecho con Cut / Copy / Paste / Select all en cualquier parte del texto), copia de respaldo manual, exportar e importar, cifrado y en texto plano (§10.9) |
 | **Futuro** | Shamir 2-de-3, Linux/macOS, modo terminal (editar la vault desde la consola, como nano o vim) |
 
 ### 14.1 Estado (2026-10-29)
@@ -727,7 +803,7 @@ Decisiones tomadas al implementar la v0.4:
   - **Dependencias actualizadas** (2026-11-07, los PR de Dependabot #1–#8): `argon2` 0.6, `chacha20poly1305` 0.11, `hkdf` 0.13 (con `sha2` 0.11, que exige), `getrandom` 0.4 y `windows-sys` 0.61; en los workflows, `checkout` v7, `upload-artifact` v7 y `cache` v6. Antes de actualizar se fijaron **vectores conocidos** de cada primitiva con las versiones anteriores (`crypto::tests::known_answers`) y las vaults de prueba de §5.6; con las versiones nuevas dan exactamente lo mismo. Argon2id se comparó además entre 0.5 y 0.6 con los parámetros reales (256 MiB / t = 3 / p = 4, y los del código de recuperación): idéntico. La clave de XChaCha20 se pasa con `new_from_slice` para no dejar una copia sin borrar en la pila.
   - **Releases** (`.github/workflows/release.yml`, 2026-11-07): al subir una etiqueta `v*` se corren los tests, se compila `heimdall.exe` en Windows y se publica un release de GitHub con el ejecutable, `SHA256SUMS.txt` y una **atestación de procedencia** (`actions/attest-build-provenance`, firmada con Sigstore), que liga el `.exe` al commit y a la ejecución del workflow. Se verifica con `Get-FileHash` y `gh attestation verify` (`SECURITY.md`). **Sin certificado de firma de código**: SmartScreen puede avisar la primera vez. Las atestaciones solo funcionan en repositorios públicos (o con GitHub Enterprise Cloud); mientras el repositorio sea privado, el paso se salta y el release lleva solo el hash.
 
-- **v1.0 — en curso (2026-11-07).** Formato congelado (§5.6) y menú contextual general hechos.
+- **v1.0 — en curso (2026-11-07).** Formato congelado (§5.6) y menú contextual general hechos. Exportar, importar y copia de respaldo: diseño cerrado (§10.9), en implementación.
   - **Menú contextual general** (§10.1): un clic derecho en el texto que no cae sobre un secreto ni sobre una palabra mal escrita abre *Cut* / *Copy* / *Paste* / *Select all* (con sus atajos a la derecha). *Cut* y *Copy* salen en gris sin selección; *Paste*, si el portapapeles no tiene texto. Debajo, *Mark as secret* (con selección) y *Reveal all secrets…* (Basic, si la nota tiene secretos).
   - **Las acciones del menú mandan los mismos eventos que el teclado** (Ctrl+X, Ctrl+C, Ctrl+V), al cuadro siguiente, cuando el texto recupera el foco. Así una copia pasa por el mismo camino que Ctrl+C (fuera del historial y de la nube, borrado automático, temporizador corto si incluye un secreto) y lo pegado pasa por el detector de secretos (§11.3) con su Undo. Un secreto se corta o se copia entero, igual que con el teclado.
   - **Corregido de paso:** el menú sobre una selección no sabía que había selección (no salía *Mark as secret*) cuando el botón se soltaba en un cuadro distinto del que se apretó, que es lo normal. Ahora la selección se lee al abrir el menú.
