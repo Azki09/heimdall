@@ -58,7 +58,11 @@ pub fn save_vault(path: &Path, bytes: &[u8], kind: SaveKind) -> Result<()> {
     Ok(())
 }
 
-fn write_atomic(path: &Path, bytes: &[u8]) -> Result<()> {
+/// Writes a whole file so that `path` never holds half of it: `.tmp`,
+/// flush + fsync, rename over. For new files that are not the open vault
+/// (exports, backup copies, DESIGN §10.9); the vault itself goes through
+/// [`save_vault`].
+pub fn write_atomic(path: &Path, bytes: &[u8]) -> Result<()> {
     let tmp = with_suffix(path, ".tmp");
     let result = (|| {
         let mut f = File::create(&tmp)?;

@@ -5,6 +5,7 @@
 //! [`Content`] in memory until it is dropped.
 
 use secrecy::{ExposeSecret, SecretString};
+use uuid::Uuid;
 
 use crate::content::{Content, Profile};
 use crate::crypto::{self, KdfParams, Key};
@@ -240,6 +241,31 @@ impl Vault {
 
     pub fn vault_id(&self) -> &VaultId {
         &self.vault_id
+    }
+
+    /// The Argon2id cost an export inherits (DESIGN §10.9): the most costly
+    /// of this vault's password slots, so the copy is never easier to attack
+    /// than the original. Exporting from Paranoid gives 512 MiB.
+    pub fn export_kdf(&self) -> KdfParams {
+        self.known_slots()
+            .filter(|s| s.kind.uses_password())
+            .map(|s| s.kdf)
+            .max_by_key(|k| (k.m_kib, k.t, k.p))
+            .unwrap_or_else(|| KdfParams::for_profile(Profile::Basic))
+    }
+
+    /// "Export notes…" (DESIGN §10.9): a new, independent Basic vault with
+    /// copies of the notes in `ids`, opened by `password` (and its own
+    /// recovery code). Nothing else of this vault goes with them.
+    /// The caller passes [`Vault::export_kdf`]; tests pass a cheap cost.
+    pub fn export_notes(&self, ids: &[Uuid], password: &SecretString, kdf: KdfParams) -> Result<NewVault> {
+        let content = self.content.export(ids, crate::content::now());
+        if content.notes.is_empty() {
+            return Err(Error::NothingToExport);
+        }
+        let mut new = Vault::create_with_kdf(password, Profile::Basic, kdf)?;
+        new.vault.content = content;
+        Ok(new)
     }
 
     /// Where the Master Key lives (address, length), so the app can keep

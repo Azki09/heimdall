@@ -57,6 +57,10 @@ pub enum Error {
     #[error("the recovery slot cannot be revoked; regenerate the code instead")]
     CannotRevokeRecovery,
 
+    // ---- Export ----
+    #[error("no notes were chosen")]
+    NothingToExport,
+
     // ---- Crypto / OS ----
     #[error("cryptographic failure")]
     Crypto,

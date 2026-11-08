@@ -13,8 +13,9 @@ use crate::format::SlotId;
 /// 2 added [`Content::access`] (v0.3); 3 added code mode per note,
 /// [`EditorSettings::code_tip`], the spell check language and the personal
 /// dictionary; 4 added the secret clipboard timer, locking with Windows and
-/// the paste detector settings (v0.4). Versions 1 to 3 are still read.
-pub const CONTENT_VERSION: u16 = 4;
+/// the paste detector settings (v0.4); 5 added the export password setting
+/// and the last backup date (v1.0). Versions 1 to 4 are still read.
+pub const CONTENT_VERSION: u16 = 5;
 /// Plaintext is padded to a multiple of this (DESIGN §5.3).
 pub const PAD_BLOCK: usize = 4096;
 /// Notes stay in the trash this long before being purged (DESIGN §10.3).
@@ -53,6 +54,9 @@ pub struct SecuritySettings {
     /// Win+L. Always on in Hardened and Paranoid (§12).
     pub lock_on_windows_lock: bool,
     pub remember_recent: bool,
+    /// Ask for the vault password before exporting (DESIGN §10.9). Only
+    /// Basic can turn it off.
+    pub ask_password_export: bool,
 }
 
 impl SecuritySettings {
@@ -67,6 +71,7 @@ impl SecuritySettings {
                 lock_on_minimize: false,
                 lock_on_windows_lock: true,
                 remember_recent: true,
+                ask_password_export: true,
             },
             Profile::Hardened => Self {
                 profile,
@@ -77,6 +82,7 @@ impl SecuritySettings {
                 lock_on_minimize: false,
                 lock_on_windows_lock: true,
                 remember_recent: false,
+                ask_password_export: true,
             },
             Profile::Paranoid => Self {
                 profile,
@@ -87,6 +93,7 @@ impl SecuritySettings {
                 lock_on_minimize: true,
                 lock_on_windows_lock: true,
                 remember_recent: false,
+                ask_password_export: true,
             },
         }
     }
@@ -268,6 +275,8 @@ pub struct Content {
     /// Words added with "Add to dictionary"; the spell checker accepts them
     /// in every language (§10.4).
     pub dictionary: Vec<String>,
+    /// When "Save a backup copy…" last succeeded (DESIGN §10.9).
+    pub last_backup: Option<Timestamp>,
 }
 
 impl Drop for Content {
@@ -278,7 +287,7 @@ impl Drop for Content {
     }
 }
 
-/// Layouts of versions 1 to 3, still read (DESIGN §5.3).
+/// Layouts of versions 1 to 4, still read (DESIGN §5.3).
 mod legacy {
     use super::*;
 
@@ -483,7 +492,7 @@ mod legacy {
 
     impl From<ContentV3> for Content {
         fn from(v3: ContentV3) -> Self {
-            Self {
+            ContentV4 {
                 security: v3.security.into(),
                 editor: v3.editor.into(),
                 notes: v3.notes,
@@ -491,6 +500,79 @@ mod legacy {
                 trash: v3.trash,
                 access: v3.access,
                 dictionary: v3.dictionary,
+            }
+            .into()
+        }
+    }
+
+    /// Security settings of version 4: no export password setting.
+    #[derive(Serialize, Deserialize)]
+    pub(super) struct SecuritySettingsV4 {
+        pub profile: Profile,
+        pub lock_after_s: Option<u32>,
+        pub clipboard_clear_s: u32,
+        pub secret_clear_s: u32,
+        pub exclude_from_capture: bool,
+        pub lock_on_minimize: bool,
+        pub lock_on_windows_lock: bool,
+        pub remember_recent: bool,
+    }
+
+    impl From<SecuritySettingsV1> for SecuritySettingsV4 {
+        fn from(s: SecuritySettingsV1) -> Self {
+            let s = SecuritySettings::from(s);
+            Self {
+                profile: s.profile,
+                lock_after_s: s.lock_after_s,
+                clipboard_clear_s: s.clipboard_clear_s,
+                secret_clear_s: s.secret_clear_s,
+                exclude_from_capture: s.exclude_from_capture,
+                lock_on_minimize: s.lock_on_minimize,
+                lock_on_windows_lock: s.lock_on_windows_lock,
+                remember_recent: s.remember_recent,
+            }
+        }
+    }
+
+    impl From<SecuritySettingsV4> for SecuritySettings {
+        fn from(s: SecuritySettingsV4) -> Self {
+            Self {
+                profile: s.profile,
+                lock_after_s: s.lock_after_s,
+                clipboard_clear_s: s.clipboard_clear_s,
+                secret_clear_s: s.secret_clear_s,
+                exclude_from_capture: s.exclude_from_capture,
+                lock_on_minimize: s.lock_on_minimize,
+                lock_on_windows_lock: s.lock_on_windows_lock,
+                remember_recent: s.remember_recent,
+                ask_password_export: true,
+            }
+        }
+    }
+
+    /// Version 4 (v0.4, v0.5): the layout frozen in DESIGN §5.6.
+    #[derive(Serialize, Deserialize)]
+    pub(super) struct ContentV4 {
+        pub security: SecuritySettingsV4,
+        pub editor: EditorSettings,
+        pub notes: Vec<Note>,
+        pub active_note: Option<Uuid>,
+        pub trash: Vec<Note>,
+        pub access: Vec<AccessLabel>,
+        pub dictionary: Vec<String>,
+    }
+
+    impl From<ContentV4> for Content {
+        fn from(v4: ContentV4) -> Self {
+            Self {
+                security: v4.security.into(),
+                editor: v4.editor,
+                notes: v4.notes,
+                active_note: v4.active_note,
+                trash: v4.trash,
+                access: v4.access,
+                dictionary: v4.dictionary,
+                last_backup: None,
             }
         }
     }
@@ -508,6 +590,7 @@ impl Content {
             trash: Vec::new(),
             access: Vec::new(),
             dictionary: Vec::new(),
+            last_backup: None,
         }
     }
 
@@ -555,6 +638,53 @@ impl Content {
         self.notes.push(note);
         self.active_note = Some(id);
         id
+    }
+
+    /// The content of an exported vault (DESIGN §10.9): copies of the notes
+    /// in `ids`, in tab order, with the defaults of a new Basic vault. No
+    /// trash, dictionary, access labels or settings of this vault.
+    pub fn export(&self, ids: &[Uuid], now: Timestamp) -> Content {
+        let mut out = Content::new(Profile::Basic, now);
+        out.notes = self
+            .notes
+            .iter()
+            .filter(|n| ids.contains(&n.id))
+            .cloned()
+            .collect();
+        out.active_note = out.notes.first().map(|n| n.id);
+        out
+    }
+
+    /// Adds `notes` as new tabs at the end (import, DESIGN §10.9): each gets
+    /// a new id and leaves the trash, and a title that is already taken
+    /// gets " (2)", " (3)"… The first one becomes active. Returns the ids.
+    pub fn import_notes(&mut self, notes: impl IntoIterator<Item = Note>) -> Vec<Uuid> {
+        let mut taken: Vec<Zeroizing<String>> = self
+            .notes
+            .iter()
+            .map(|n| Zeroizing::new(n.display_title().to_owned()))
+            .collect();
+        let mut ids = Vec::new();
+        for mut note in notes {
+            note.id = Uuid::new_v4();
+            note.deleted_at = None;
+            let title = Zeroizing::new(note.display_title().to_owned());
+            if !title.is_empty() && taken.iter().any(|t| **t == *title) {
+                let free = (2..)
+                    .map(|n| format!("{} ({n})", *title))
+                    .find(|c| !taken.iter().any(|t| **t == *c))
+                    .expect("some number is free");
+                note.title.zeroize();
+                note.title = free;
+            }
+            taken.push(Zeroizing::new(note.display_title().to_owned()));
+            ids.push(note.id);
+            self.notes.push(note);
+        }
+        if let Some(&first) = ids.first() {
+            self.active_note = Some(first);
+        }
+        ids
     }
 
     /// Ctrl+W: moves the note to the trash, or drops it if it was empty
@@ -647,6 +777,7 @@ impl Content {
             1 => postcard::take_from_bytes::<legacy::ContentV1>(rest).map(|(c, r)| (Content::from(c), r)),
             2 => postcard::take_from_bytes::<legacy::ContentV2>(rest).map(|(c, r)| (Content::from(c), r)),
             3 => postcard::take_from_bytes::<legacy::ContentV3>(rest).map(|(c, r)| (Content::from(c), r)),
+            4 => postcard::take_from_bytes::<legacy::ContentV4>(rest).map(|(c, r)| (Content::from(c), r)),
             CONTENT_VERSION => postcard::take_from_bytes::<Content>(rest),
             other => return Err(Error::UnsupportedContentVersion(other)),
         }
@@ -766,10 +897,10 @@ mod tests {
         ));
 
         let mut plain = c.to_padded_plaintext().unwrap().to_vec();
-        plain[4] = 5; // version varint
+        plain[4] = 6; // version varint
         assert!(matches!(
             Content::from_padded_plaintext(&plain),
-            Err(Error::UnsupportedContentVersion(5))
+            Err(Error::UnsupportedContentVersion(6))
         ));
 
         assert!(Content::from_padded_plaintext(&[0; 10]).is_err());
@@ -867,6 +998,108 @@ mod tests {
         assert_eq!(read.security.secret_clear_s, 10);
         assert!(read.editor.mask_pasted && read.editor.secret_tip);
         assert!(!read.editor.code_tip);
+    }
+
+    /// A vault saved by v0.4/v0.5 (the layout frozen in DESIGN §5.6) opens
+    /// with the export password on and no backup date.
+    #[test]
+    fn reads_version_4() {
+        let mut c = sample_v3();
+        c.security.lock_on_minimize = true;
+        let s = &c.security;
+        let v4 = legacy::ContentV4 {
+            security: legacy::SecuritySettingsV4 {
+                profile: s.profile,
+                lock_after_s: s.lock_after_s,
+                clipboard_clear_s: s.clipboard_clear_s,
+                secret_clear_s: s.secret_clear_s,
+                exclude_from_capture: s.exclude_from_capture,
+                lock_on_minimize: s.lock_on_minimize,
+                lock_on_windows_lock: s.lock_on_windows_lock,
+                remember_recent: s.remember_recent,
+            },
+            editor: c.editor.clone(),
+            notes: c.notes.clone(),
+            active_note: c.active_note,
+            trash: c.trash.clone(),
+            access: c.access.clone(),
+            dictionary: c.dictionary.clone(),
+        };
+        let plain = padded(4, &postcard::to_allocvec(&v4).unwrap());
+        let read = Content::from_padded_plaintext(&plain).unwrap();
+        assert_eq!(read, c);
+        assert!(read.security.ask_password_export);
+        assert_eq!(read.last_backup, None);
+    }
+
+    #[test]
+    fn version_5_fields_roundtrip() {
+        let mut c = sample();
+        c.security = SecuritySettings::defaults_for(Profile::Basic);
+        c.security.ask_password_export = false;
+        c.last_backup = Some(1_234);
+        assert!(c.security.is_custom());
+        let plain = c.to_padded_plaintext().unwrap();
+        assert_eq!(Content::from_padded_plaintext(&plain).unwrap(), c);
+    }
+
+    #[test]
+    fn export_keeps_only_the_chosen_notes() {
+        let mut c = sample_v3();
+        let a = c.notes[0].id;
+        let b = c.notes[1].id;
+        c.new_note(3_000);
+        c.notes[2].body = "not exported".into();
+        c.close_note(c.notes[2].id, 4_000);
+        c.set_label(SlotId([7; 8]), "KINGSTON", 5);
+        c.security = SecuritySettings::defaults_for(Profile::Paranoid);
+        c.editor.font_size = 18;
+
+        let out = c.export(&[b, a], 9_000);
+        // Tab order of the source, not the order of `ids`.
+        assert_eq!(out.notes.iter().map(|n| n.id).collect::<Vec<_>>(), [a, b]);
+        assert_eq!(out.notes[1].code, c.notes[1].code);
+        assert_eq!(out.notes[0].wrap, c.notes[0].wrap);
+        assert_eq!(out.active_note, Some(a));
+        assert!(out.trash.is_empty() && out.access.is_empty() && out.dictionary.is_empty());
+        assert_eq!(out.security, SecuritySettings::defaults_for(Profile::Basic));
+        assert_eq!(out.editor, EditorSettings::default());
+        assert_eq!(out.last_backup, None);
+    }
+
+    #[test]
+    fn import_renames_taken_titles() {
+        let mut c = Content::new(Profile::Basic, 0);
+        c.notes[0].title = "Servers".into();
+        let first_line = c.new_note(0);
+        c.note_mut(first_line).unwrap().body = "Wi-Fi
+password"
+            .into();
+
+        let mut a = Note::new(1);
+        a.title = "Servers".into();
+        let mut b = Note::new(1);
+        b.title = "Servers".into();
+        let mut d = Note::new(1);
+        d.body = "Wi-Fi
+other"
+            .into();
+        d.deleted_at = Some(5);
+        let e = Note::new(1); // empty: no title to clash
+        let old_ids = [a.id, b.id, d.id, e.id];
+
+        let ids = c.import_notes([a, b, d, e]);
+        assert_eq!(ids.len(), 4);
+        assert!(ids.iter().all(|id| !old_ids.contains(id)));
+        let titles: Vec<&str> = c.notes[2..].iter().map(|n| n.display_title()).collect();
+        assert_eq!(titles, ["Servers (2)", "Servers (3)", "Wi-Fi (2)", ""]);
+        assert!(c.notes.iter().all(|n| n.deleted_at.is_none()));
+        assert_eq!(c.active_note, Some(ids[0]));
+        assert_eq!(
+            c.notes[4].body,
+            "Wi-Fi
+other"
+        );
     }
 
     #[test]

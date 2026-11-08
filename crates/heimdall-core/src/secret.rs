@@ -62,6 +62,27 @@ pub fn contains_secret(text: &str) -> bool {
 /// The text as it is shown masked: each secret becomes [`MASK`] and each
 /// escape loses its `\`. For tab titles and search results.
 pub fn mask(text: &str) -> String {
+    replace(text, |_| MASK)
+}
+
+/// What "Hide" writes for each secret in a plain-text export (DESIGN §10.9).
+pub const HIDDEN: &str = "[secret]";
+
+/// Plain-text export with "Hide": each secret becomes [`HIDDEN`] and each
+/// escape loses its `\`.
+pub fn hide(text: &str) -> String {
+    replace(text, |_| HIDDEN)
+}
+
+/// Plain-text export with "Reveal": each secret becomes its value, without
+/// delimiters, and each escape loses its `\`. The result is meant to be
+/// read, not to be opened again as a note.
+pub fn reveal(text: &str) -> String {
+    replace(text, |value| value)
+}
+
+/// Each secret replaced by `with(value)`, and each escape without its `\`.
+fn replace<'a>(text: &'a str, with: impl Fn(&'a str) -> &'a str) -> String {
     if !text.contains(OPEN) {
         return text.to_owned();
     }
@@ -76,7 +97,7 @@ pub fn mask(text: &str) -> String {
             escapes.next();
         }
         out.push_str(&text[at..s.start]);
-        out.push_str(MASK);
+        out.push_str(with(&text[value(s)]));
         at = s.end;
     }
     for &e in escapes {
@@ -257,6 +278,16 @@ mod tests {
 
     fn secrets(text: &str) -> Vec<&str> {
         scan(text).secrets.iter().map(|r| &text[r.clone()]).collect()
+    }
+
+    #[test]
+    fn plain_text_export_modes() {
+        let t = r"pw: {*hunter2*}, literal \{*x*}, open {* end";
+        assert_eq!(hide(t), "pw: [secret], literal {*x*}, open {* end");
+        assert_eq!(reveal(t), "pw: hunter2, literal {*x*}, open {* end");
+        assert_eq!(hide("no secrets"), "no secrets");
+        // Closed by the first `*}`.
+        assert_eq!(reveal("{*a{*b*}c*}"), "a{*bc*}");
     }
 
     #[test]
