@@ -1,0 +1,95 @@
+# Security policy
+
+Heimdall is an encrypted notepad. Security reports are welcome and taken
+seriously.
+
+## Reporting a vulnerability
+
+Please **do not open a public issue** for a security problem.
+
+Report it privately through GitHub:
+
+1. Go to the repository's **Security** tab.
+2. Choose **Report a vulnerability** (private vulnerability reporting).
+3. Describe the problem, the affected version or commit, and how to
+   reproduce it. A sample `.heim` file or keyfile is helpful, but never
+   send a vault that holds real data.
+
+You should get a first answer within 7 days. Once a fix is ready it is
+released, and the advisory is published with credit to the reporter
+(unless you prefer to stay anonymous).
+
+## Supported versions
+
+Heimdall is pre-1.0. Only the **latest release** receives security fixes.
+After 1.0, the latest minor version of each supported major version will.
+
+| Version        | Supported |
+|----------------|-----------|
+| Latest release | Yes       |
+| Older releases | No        |
+
+## Scope
+
+In scope:
+
+- The cryptography and the `.heim` file format (`crates/heimdall-core`):
+  key derivation, key slots, master key rotation, authenticated encryption,
+  recovery codes, keyfiles.
+- Anything that lets someone read or change a vault without the required
+  password, keyfile or recovery code.
+- Secrets leaking to disk, to the clipboard history, to screenshots or to
+  logs in ways the documentation says should not happen.
+- Crashes or hangs when opening a malformed `.heim` or `.bifrost` file.
+- The release pipeline (a build that does not match the source).
+
+Out of scope (see the threat model below):
+
+- Attacks that need malware, a keylogger or a debugger already running on
+  the machine while the vault is unlocked.
+- Someone who has the recovery sheet. The recovery code opens the vault by
+  design.
+- Weak passwords chosen despite the strength meter.
+
+## Threat model in short
+
+The full threat model is in [`docs/DESIGN.md`](docs/DESIGN.md), section 2.
+
+Heimdall protects against:
+
+- A stolen laptop, disk or USB drive, or a leaked `.heim` file. Everything
+  is encrypted with XChaCha20-Poly1305 under a key derived with Argon2id.
+- Tampering with the file. It is detected and the file is rejected.
+- A copied presence keyfile on its own. The password is still needed.
+- Casual shoulder surfing and screen capture, partially: masked secrets,
+  capture exclusion and automatic locking.
+
+Heimdall does **not** protect against:
+
+- Malware, keyloggers or remote-access tools on the computer while the
+  vault is unlocked. No local application can.
+- Someone who finds the recovery sheet.
+- Losing both the password and the recovery code. The data cannot be
+  recovered; there is no backdoor.
+- Advanced physical attacks on RAM. Key lifetime in memory is kept short
+  and keys are wiped on lock, but this is a mitigation, not a guarantee.
+
+## Verifying a release
+
+Every release on GitHub includes `heimdall.exe`, a `SHA256SUMS.txt` file
+and a build provenance attestation that ties the executable to the exact
+commit and workflow run that produced it.
+
+Check the hash in PowerShell and compare it with `SHA256SUMS.txt`:
+
+```powershell
+Get-FileHash .\heimdall.exe -Algorithm SHA256
+```
+
+Check the attestation with the GitHub CLI:
+
+```powershell
+gh attestation verify .\heimdall.exe -R Azki09/heimdall
+```
+
+If either check fails, do not run the file.

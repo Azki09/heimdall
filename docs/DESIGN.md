@@ -706,7 +706,9 @@ Decisiones tomadas al implementar la v0.4:
   - **Fuzzing** (`fuzz/`, cargo-fuzz): `vault_file`, `keyfile`, `content`, `recovery_code` y `secrets`. Cada objetivo comprueba además una propiedad (lo que se lee se vuelve a escribir byte por byte, Unmask quita exactamente un secreto…). Cada noche corre 15 min por objetivo con el corpus guardado (`.github/workflows/fuzz.yml`). El core expone `heimdall_core::fuzzing` solo con la feature `fuzzing`.
   - **Encontrado por el fuzzing:** Unmask (y el Undo del detector) podía dejar un secreto nuevo, o dejar visible el siguiente. Corregido en `secret::unmask` y `secret::escape_all`.
   - **Ignorados en `deny.toml`**, con su motivo: `paste` y `ttf-parser`, sin mantenimiento, vienen de egui 0.31; no son vulnerabilidades. Se quitan al actualizar egui.
-  - **Falta:** subir el repositorio a GitHub para que corra la CI, releases firmados, `SECURITY.md`.
+  - **Repositorio en GitHub** (2026-11-07, privado): `Azki09/heimdall`. La CI pasa completa. El `cargo-fuzz` precompilado que instala `taiki-e/install-action` está compilado para musl y usa ese target por defecto, donde AddressSanitizer no enlaza: los workflows pasan `--target x86_64-unknown-linux-gnu`.
+  - **`SECURITY.md`** (2026-11-07): cómo reportar vulnerabilidades en privado (GitHub, *Report a vulnerability*), versiones con soporte, alcance, resumen del modelo de amenazas (§2) y cómo verificar un release.
+  - **Falta:** releases firmados.
 
 - **Modo código (§10.6) — hecho (2026-10-29), sin commit todavía.** Contenido versión 3. Probado a mano con una vault nueva y con una vault versión 2 creada con el código anterior.
 
