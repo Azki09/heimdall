@@ -708,7 +708,7 @@ Decisiones tomadas al implementar la v0.4:
   - **Ignorados en `deny.toml`**, con su motivo: `paste` y `ttf-parser`, sin mantenimiento, vienen de egui 0.31; no son vulnerabilidades. Se quitan al actualizar egui.
   - **Repositorio en GitHub** (2026-11-07, privado): `Azki09/heimdall`. La CI pasa completa. El `cargo-fuzz` precompilado que instala `taiki-e/install-action` está compilado para musl y usa ese target por defecto, donde AddressSanitizer no enlaza: los workflows pasan `--target x86_64-unknown-linux-gnu`.
   - **`SECURITY.md`** (2026-11-07): cómo reportar vulnerabilidades en privado (GitHub, *Report a vulnerability*), versiones con soporte, alcance, resumen del modelo de amenazas (§2) y cómo verificar un release.
-  - **Falta:** releases firmados.
+  - **Releases** (`.github/workflows/release.yml`, 2026-11-07): al subir una etiqueta `v*` se corren los tests, se compila `heimdall.exe` en Windows y se publica un release de GitHub con el ejecutable, `SHA256SUMS.txt` y una **atestación de procedencia** (`actions/attest-build-provenance`, firmada con Sigstore), que liga el `.exe` al commit y a la ejecución del workflow. Se verifica con `Get-FileHash` y `gh attestation verify` (`SECURITY.md`). **Sin certificado de firma de código**: SmartScreen puede avisar la primera vez. Las atestaciones solo funcionan en repositorios públicos (o con GitHub Enterprise Cloud); mientras el repositorio sea privado, el paso se salta y el release lleva solo el hash.
 
 - **Modo código (§10.6) — hecho (2026-10-29), sin commit todavía.** Contenido versión 3. Probado a mano con una vault nueva y con una vault versión 2 creada con el código anterior.
 

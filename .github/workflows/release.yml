@@ -1,0 +1,56 @@
+# Pushing a tag like v1.0.0 builds heimdall.exe on GitHub's runners,
+# publishes it with its SHA-256 and a build provenance attestation that
+# ties the executable to this commit and this workflow run.
+# Users verify with Get-FileHash and `gh attestation verify` (SECURITY.md).
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  release:
+    name: Build and publish
+    runs-on: windows-latest
+    permissions:
+      contents: write # create the release
+      id-token: write # sign the attestation (Sigstore)
+      attestations: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Tests
+        run: cargo test --workspace --locked
+      - name: Release build
+        run: cargo build --release --locked -p heimdall-app
+      - name: Collect files and hash
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory dist | Out-Null
+          Copy-Item target/release/heimdall.exe dist/
+          $hash = (Get-FileHash dist/heimdall.exe -Algorithm SHA256).Hash.ToLower()
+          # Same layout as sha256sum: "<hash>  <file>", LF line ending.
+          [IO.File]::WriteAllText("dist/SHA256SUMS.txt", "$hash  heimdall.exe`n")
+          Get-Content dist/SHA256SUMS.txt
+      # Attestations need a public repository (or GitHub Enterprise Cloud).
+      # While the repository is private the release ships with the hash only.
+      - name: Attest build provenance
+        if: ${{ !github.event.repository.private }}
+        uses: actions/attest-build-provenance@v4
+        with:
+          subject-path: dist/heimdall.exe
+      - name: Publish release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ github.ref_name }}" dist/heimdall.exe dist/SHA256SUMS.txt `
+            --title "Heimdall ${{ github.ref_name }}" `
+            --generate-notes `
+            --verify-tag

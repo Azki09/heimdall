@@ -93,3 +93,7 @@ gh attestation verify .\heimdall.exe -R Azki09/heimdall
 ```
 
 If either check fails, do not run the file.
+
+The executable is not signed with a code-signing certificate, so Windows
+SmartScreen may warn the first time it runs. The hash and the attestation
+are what prove the file is genuine.
