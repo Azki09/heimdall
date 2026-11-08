@@ -429,6 +429,10 @@ El modelo es el **Bloc de notas de Windows 11**: cada nota es una pestaña. Quie
 
 Todos los atajos aparecen en *Settings → Shortcuts*.
 
+- **Al cerrar la última pestaña** se abre una nota vacía "Untitled", como en el Bloc de notas: el editor nunca se queda sin pestañas. Es el único caso en que aparece una pestaña sin Ctrl+T ni `+`.
+- **Los atajos que hacen algo una sola vez** (Ctrl+T, Ctrl+W, Ctrl+Shift+T, Ctrl+S, Ctrl+L, Ctrl+1…9…) **no se repiten al mantener las teclas**: antes, mantener Ctrl+T abría una pestaña por cada repetición del teclado, y Ctrl+W cerraba varias. Ctrl+Tab, F3 y el zoom sí se repiten.
+- **Con AltGr no hay atajos de Ctrl.** Windows envía AltGr como Ctrl+Alt, y AltGr escribe caracteres en muchos teclados (en polaco AltGr+L es "ł"; en español de España AltGr+2 es "@"). Antes eso podía bloquear la vault o cambiar de pestaña al escribir.
+
 - **Indicador de cambios:** un punto `•` en la pestaña con cambios sin guardar, igual que en el Bloc de notas.
 - **Restaurar sesión:** al abrir la vault, las pestañas aparecen en el mismo orden, con la misma pestaña activa y el cursor donde estaba. Todo eso vive dentro del contenido cifrado.
 - **Ancho de las pestañas:** todas miden lo mismo, 200 px si caben; con más pestañas se achican por igual hasta 96 px. El título se corta con "…" según el ancho, y el título completo aparece al pasar el ratón.

@@ -522,6 +522,50 @@ pub fn ui(ctx: &egui::Context, s: &mut Session, st: &mut EditorState, last_input
     action
 }
 
+/// A shortcut press, if `e` is one for `key` with `mods`: `Some(repeat)`.
+///
+/// Like egui's `consume_key`, extra Shift is ignored (so check Ctrl+Shift
+/// variants first), but extra Alt is not: Windows reports AltGr as
+/// Ctrl+Alt, and AltGr types characters (Polish AltGr+L is "ł", Spanish
+/// AltGr+2 is "@"), which must not lock the vault or switch tabs.
+fn shortcut_press(e: &egui::Event, mods: Modifiers, key: Key) -> Option<bool> {
+    match e {
+        egui::Event::Key {
+            key: k,
+            modifiers: m,
+            pressed: true,
+            repeat,
+            ..
+        } if *k == key && m.matches_logically(mods) && (mods.alt || !m.alt) => Some(*repeat),
+        _ => None,
+    }
+}
+
+/// Consumes every press of the shortcut (key repeats too, so they don't
+/// reach the text) and returns whether one counts.
+fn take_shortcut(i: &mut egui::InputState, mods: Modifiers, key: Key, allow_repeat: bool) -> bool {
+    let mut hit = false;
+    i.events.retain(|e| match shortcut_press(e, mods, key) {
+        Some(is_repeat) => {
+            hit |= allow_repeat || !is_repeat;
+            false
+        }
+        None => true,
+    });
+    hit
+}
+
+/// A one-shot shortcut: holding the keys doesn't repeat it. Holding Ctrl+T
+/// used to open a tab per key repeat, and Ctrl+W to close one per repeat.
+fn press(i: &mut egui::InputState, mods: Modifiers, key: Key) -> bool {
+    take_shortcut(i, mods, key, false)
+}
+
+/// A shortcut that repeats while held (next tab, find next, zoom).
+fn repeat(i: &mut egui::InputState, mods: Modifiers, key: Key) -> bool {
+    take_shortcut(i, mods, key, true)
+}
+
 fn shortcuts(ctx: &egui::Context, s: &mut Session, st: &mut EditorState) -> Option<Action> {
     let cmd = Modifiers::COMMAND;
     let cmd_shift = Modifiers::COMMAND | Modifiers::SHIFT;
@@ -535,29 +579,29 @@ fn shortcuts(ctx: &egui::Context, s: &mut Session, st: &mut EditorState) -> Opti
 
     let global_wrap = content.editor.word_wrap;
     ctx.input_mut(|i| {
-        // Shift variants first: consume_key ignores extra modifiers.
-        if i.consume_key(cmd_shift, Key::F) {
+        // Shift variants first: press() ignores an extra Shift.
+        if press(i, cmd_shift, Key::F) {
             open_find_all = true;
         }
-        if i.consume_key(cmd, Key::F) {
+        if press(i, cmd, Key::F) {
             open_find = true;
         }
-        if i.consume_key(Modifiers::SHIFT, Key::F3) {
+        if repeat(i, Modifiers::SHIFT, Key::F3) {
             find_step = -1;
-        } else if i.consume_key(Modifiers::NONE, Key::F3) {
+        } else if repeat(i, Modifiers::NONE, Key::F3) {
             find_step = 1;
         }
-        // Before Ctrl+T: consume_key ignores extra modifiers, so Ctrl+Shift+T
+        // Before Ctrl+T: press() ignores an extra Shift, so Ctrl+Shift+T
         // would match Ctrl+T too.
-        if i.consume_key(cmd_shift, Key::T) && content.reopen_last_closed().is_some() {
+        if press(i, cmd_shift, Key::T) && content.reopen_last_closed().is_some() {
             st.focus_editor = true;
             changed = true;
         }
-        if i.consume_key(cmd_shift, Key::H) {
+        if press(i, cmd_shift, Key::H) {
             st.mark_secret = true;
             st.focus_editor = true;
         }
-        if i.consume_key(cmd_shift, Key::M) {
+        if press(i, cmd_shift, Key::M) {
             if let Some(n) = content.active_note.and_then(|id| content.note_mut(id)) {
                 n.code = match n.code {
                     Some(_) => None,
@@ -572,7 +616,7 @@ fn shortcuts(ctx: &egui::Context, s: &mut Session, st: &mut EditorState) -> Opti
                 changed = true;
             }
         }
-        if i.consume_key(Modifiers::ALT, Key::Z) {
+        if press(i, Modifiers::ALT, Key::Z) {
             // Windows may send the "z" as typed text as well.
             i.events
                 .retain(|e| !matches!(e, egui::Event::Text(t) if t.eq_ignore_ascii_case("z")));
@@ -581,7 +625,7 @@ fn shortcuts(ctx: &egui::Context, s: &mut Session, st: &mut EditorState) -> Opti
                 changed = true;
             }
         }
-        if i.consume_key(cmd, Key::T) {
+        if press(i, cmd, Key::T) {
             content.new_note(now);
             if content.editor.code_tip {
                 st.tip = Some(Tip { left: TIP_SECONDS });
@@ -589,25 +633,25 @@ fn shortcuts(ctx: &egui::Context, s: &mut Session, st: &mut EditorState) -> Opti
             st.focus_editor = true;
             changed = true;
         }
-        if i.consume_key(cmd, Key::W) {
+        if press(i, cmd, Key::W) {
             if let Some(id) = content.active_note {
                 content.close_note(id, now);
                 st.focus_editor = true;
                 changed = true;
             }
         }
-        if i.consume_key(cmd, Key::S) {
+        if press(i, cmd, Key::S) {
             action = Some(Save);
         }
-        if i.consume_key(cmd, Key::L) {
+        if press(i, cmd, Key::L) {
             action = Some(Lock);
         }
-        if i.consume_key(cmd, Key::Comma) {
+        if press(i, cmd, Key::Comma) {
             action = Some(OpenSettings);
         }
-        let step = if i.consume_key(cmd_shift, Key::Tab) {
+        let step = if repeat(i, cmd_shift, Key::Tab) {
             Some(-1)
-        } else if i.consume_key(cmd, Key::Tab) {
+        } else if repeat(i, cmd, Key::Tab) {
             Some(1)
         } else {
             None
@@ -634,7 +678,7 @@ fn shortcuts(ctx: &egui::Context, s: &mut Session, st: &mut EditorState) -> Opti
             Key::Num9,
         ];
         for (k, key) in digits.into_iter().enumerate() {
-            if i.consume_key(cmd, key) {
+            if press(i, cmd, key) {
                 let target = if k == 8 {
                     content.notes.len().saturating_sub(1)
                 } else {
@@ -648,13 +692,13 @@ fn shortcuts(ctx: &egui::Context, s: &mut Session, st: &mut EditorState) -> Opti
         }
         let zoom = &mut content.editor.zoom_percent;
         let before = *zoom;
-        if i.consume_key(cmd, Key::Plus) || i.consume_key(cmd, Key::Equals) {
+        if repeat(i, cmd, Key::Plus) || repeat(i, cmd, Key::Equals) {
             *zoom = (*zoom + 10).min(300);
         }
-        if i.consume_key(cmd, Key::Minus) {
+        if repeat(i, cmd, Key::Minus) {
             *zoom = zoom.saturating_sub(10).max(50);
         }
-        if i.consume_key(cmd, Key::Num0) {
+        if press(i, cmd, Key::Num0) {
             *zoom = 100;
         }
         changed |= *zoom != before;
@@ -3762,4 +3806,54 @@ fn undo_paste(ctx: &egui::Context, s: &mut Session, u: Undo) {
         u.chars.0 + u.replacement.chars().count(),
     );
     s.touch(Some(u.note));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn key(k: Key, modifiers: Modifiers, repeat: bool) -> egui::Event {
+        egui::Event::Key {
+            key: k,
+            physical_key: None,
+            pressed: true,
+            repeat,
+            modifiers,
+        }
+    }
+
+    fn input(events: Vec<egui::Event>) -> egui::InputState {
+        let mut i = egui::InputState::default();
+        i.events = events;
+        i
+    }
+
+    #[test]
+    fn held_shortcut_fires_once_and_swallows_repeats() {
+        let ctrl = Modifiers::COMMAND;
+        let mut i = input(vec![key(Key::T, ctrl, true), key(Key::T, ctrl, true)]);
+        assert!(!press(&mut i, ctrl, Key::T), "repeats alone don't open tabs");
+        assert!(i.events.is_empty(), "repeats are consumed, not typed");
+
+        let mut i = input(vec![key(Key::Tab, ctrl, true)]);
+        assert!(repeat(&mut i, ctrl, Key::Tab));
+
+        let mut i = input(vec![key(Key::T, ctrl, false)]);
+        assert!(press(&mut i, ctrl, Key::T));
+    }
+
+    #[test]
+    fn altgr_is_not_ctrl() {
+        let altgr = Modifiers::COMMAND | Modifiers::ALT;
+        let mut i = input(vec![key(Key::L, altgr, false), key(Key::Num2, altgr, false)]);
+        assert!(!press(&mut i, Modifiers::COMMAND, Key::L));
+        assert!(!press(&mut i, Modifiers::COMMAND, Key::Num2));
+        assert_eq!(i.events.len(), 2, "left for the text field");
+    }
+
+    #[test]
+    fn extra_shift_still_matches() {
+        let mut i = input(vec![key(Key::T, Modifiers::COMMAND | Modifiers::SHIFT, false)]);
+        assert!(press(&mut i, Modifiers::COMMAND, Key::T));
+    }
 }
