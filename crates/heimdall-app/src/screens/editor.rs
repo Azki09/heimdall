@@ -79,8 +79,11 @@ pub struct EditorState {
     reveals: Reveals,
     /// Ctrl+Shift+H (or the menu): make the selection a secret.
     mark_secret: bool,
-    /// The right-click menu of a secret or a selection, while it is open.
+    /// The right-click menu of a secret, or the general one, while it is open.
     secret_menu: Option<SecretMenu>,
+    /// Cut / Copy / Paste / Select all chosen in the right-click menu; done
+    /// next frame, once the text has the focus back.
+    edit_action: Option<EditAction>,
     /// The Edit secret / New secret dialog.
     secret_edit: Option<SecretEdit>,
     /// Reveal all asks for the password first (Basic only).
@@ -261,9 +264,19 @@ impl Reveals {
 struct SecretMenu {
     pos: Pos2,
     note: Uuid,
-    /// The secret right-clicked (its index), or `None` for the selection.
+    /// The secret right-clicked (its index), or `None` for the general menu.
     target: Option<usize>,
     has_selection: bool,
+    /// The clipboard had text when the menu opened (enables Paste).
+    can_paste: bool,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum EditAction {
+    Cut,
+    Copy,
+    Paste,
+    SelectAll,
 }
 
 struct SecretEdit {
@@ -1073,6 +1086,30 @@ fn text_area(ui: &mut Ui, s: &mut Session, st: &mut EditorState) {
         }
     }
 
+    // Cut / Copy / Paste / Select all from the right-click menu. They send
+    // the same events as the keyboard, so a copy goes through
+    // `handle_copies` (kept out of the clipboard history, auto-cleared,
+    // shorter timer with a secret) and a paste through the detector below.
+    if let Some(action) = st.edit_action.take() {
+        match action {
+            EditAction::SelectAll => {
+                let chars = note.body.chars().count();
+                let mut state = egui::TextEdit::load_state(&ctx, id).unwrap_or_default();
+                state
+                    .cursor
+                    .set_char_range(Some(CCursorRange::two(CCursor::new(0), CCursor::new(chars))));
+                state.store(&ctx, id);
+            }
+            EditAction::Cut => ctx.input_mut(|i| i.events.push(egui::Event::Cut)),
+            EditAction::Copy => ctx.input_mut(|i| i.events.push(egui::Event::Copy)),
+            EditAction::Paste => {
+                if let Some(text) = crate::support::clipboard_text() {
+                    ctx.input_mut(|i| i.events.push(egui::Event::Paste(String::clone(&text))));
+                }
+            }
+        }
+    }
+
     let has_focus = ctx.memory(|m| m.has_focus(id));
     if std::mem::take(&mut st.mark_secret) {
         inserted |= mark_secret(&ctx, id, note, st);
@@ -1359,6 +1396,7 @@ fn text_area(ui: &mut Ui, s: &mut Session, st: &mut EditorState) {
                     note: active,
                     target: Some(i),
                     has_selection: false,
+                    can_paste: false,
                 });
             }
         }
@@ -1401,10 +1439,17 @@ fn text_area(ui: &mut Ui, s: &mut Session, st: &mut EditorState) {
     }
 
     // Right-click: a secret's menu; else a misspelled word's suggestions;
-    // else Mark as secret / Reveal all.
+    // else the general menu (Cut, Copy, Paste, Select all, and Mark as
+    // secret / Reveal all when they apply).
     if output.response.secondary_clicked() {
         st.spell_menu = None;
         st.secret_menu = None;
+        // The click ends on release, a frame after `kept_selection` put the
+        // selection back, so read it from the text edit now.
+        let has_selection = kept_selection.is_some()
+            || egui::TextEdit::load_state(&ctx, id)
+                .and_then(|s| s.cursor.char_range())
+                .is_some_and(|r| r.primary != r.secondary);
         if let Some(pos) = ctx.input(|i| i.pointer.interact_pos()) {
             let at = output
                 .galley
@@ -1412,17 +1457,17 @@ fn text_area(ui: &mut Ui, s: &mut Session, st: &mut EditorState) {
                 .ccursor
                 .index;
             let byte = char_to_byte(&note.body, at);
-            let can_reveal_all = security.profile == Profile::Basic && !items.is_empty();
             if let Some(i) = screen.at(&items, pos) {
                 st.secret_menu = Some(SecretMenu {
                     pos,
                     note: active,
                     target: Some(i),
                     has_selection: false,
+                    can_paste: false,
                 });
             } else if let Some(m) = misses
                 .iter()
-                .filter(|_| spell_on && kept_selection.is_none())
+                .filter(|_| spell_on && !has_selection)
                 .find(|m| m.bytes.start <= byte && byte <= m.bytes.end)
             {
                 let word = note.body[m.bytes.clone()].to_owned();
@@ -1434,12 +1479,13 @@ fn text_area(ui: &mut Ui, s: &mut Session, st: &mut EditorState) {
                     word,
                     suggestions,
                 });
-            } else if kept_selection.is_some() || can_reveal_all {
+            } else {
                 st.secret_menu = Some(SecretMenu {
                     pos,
                     note: active,
                     target: None,
-                    has_selection: kept_selection.is_some(),
+                    has_selection,
+                    can_paste: crate::support::clipboard_text().is_some(),
                 });
             }
         }
@@ -2486,6 +2532,40 @@ fn menu_note(ui: &mut Ui, width: f32, text: &str) {
     );
 }
 
+/// A menu row that can be greyed out (Cut and Copy with nothing selected).
+/// A disabled row never reports a click.
+fn menu_row_enabled(
+    ui: &mut Ui,
+    width: f32,
+    text: &str,
+    hint: Option<&str>,
+    enabled: bool,
+) -> egui::Response {
+    if enabled {
+        return menu_row(ui, width, text, hint, false);
+    }
+    let (outer, resp) = ui.allocate_exact_size(vec2(width, 34.0), Sense::hover());
+    let rect = outer.shrink2(vec2(6.0, 0.0));
+    let painter = ui.painter();
+    painter.text(
+        pos2(rect.left() + 10.0, rect.center().y),
+        Align2::LEFT_CENTER,
+        text,
+        crate::theme::ui(13.0),
+        TEXT_FAINT,
+    );
+    if let Some(hint) = hint {
+        painter.text(
+            pos2(rect.right() - 10.0, rect.center().y),
+            Align2::RIGHT_CENTER,
+            hint,
+            crate::theme::ui(12.0),
+            TEXT_FAINT,
+        );
+    }
+    resp
+}
+
 fn menu_row(ui: &mut Ui, width: f32, text: &str, hint: Option<&str>, selected: bool) -> egui::Response {
     let (outer, resp) = ui.allocate_exact_size(vec2(width, 34.0), Sense::click());
     let rect = outer.shrink2(vec2(6.0, 0.0));
@@ -3200,8 +3280,9 @@ fn shortcuts_link(ui: &mut Ui) -> egui::Response {
     resp
 }
 
-/// Right-click on a secret: Reveal, Copy, Edit, Unmask. On a selection:
-/// Mark as secret. In Basic: Reveal all (DESIGN §11.1).
+/// Right-click on a secret: Reveal, Copy, Edit, Unmask. Anywhere else in
+/// the text: Cut, Copy, Paste, Select all; plus Mark as secret on a
+/// selection and, in Basic, Reveal all (DESIGN §10.1, §11.1).
 fn secret_menu(ctx: &egui::Context, s: &mut Session, st: &mut EditorState) {
     let Some(menu) = st.secret_menu.as_ref() else {
         return;
@@ -3237,7 +3318,7 @@ fn secret_menu(ctx: &egui::Context, s: &mut Session, st: &mut EditorState) {
                             chosen = Some(MenuChoice::Copy);
                         }
                         if menu_row(ui, W, "Edit secret…", None, false).clicked() {
-                            chosen = Some(MenuChoice::Edit);
+                            chosen = Some(MenuChoice::EditSecret);
                         }
                         ui.add_space(6.0);
                         menu_divider(ui, W);
@@ -3250,12 +3331,32 @@ fn secret_menu(ctx: &egui::Context, s: &mut Session, st: &mut EditorState) {
                         }
                     }
                     None => {
-                        if menu.has_selection
-                            && menu_row(ui, W, "Mark as secret", Some("Ctrl+Shift+H"), false).clicked()
-                        {
+                        let sel = menu.has_selection;
+                        for (label, hint, enabled, action) in [
+                            ("Cut", "Ctrl+X", sel, EditAction::Cut),
+                            ("Copy", "Ctrl+C", sel, EditAction::Copy),
+                            ("Paste", "Ctrl+V", menu.can_paste, EditAction::Paste),
+                        ] {
+                            if menu_row_enabled(ui, W, label, Some(hint), enabled).clicked() {
+                                chosen = Some(MenuChoice::Edit(action));
+                            }
+                        }
+                        ui.add_space(6.0);
+                        menu_divider(ui, W);
+                        ui.add_space(6.0);
+                        if menu_row(ui, W, "Select all", Some("Ctrl+A"), false).clicked() {
+                            chosen = Some(MenuChoice::Edit(EditAction::SelectAll));
+                        }
+                        let reveal_all = profile == Profile::Basic && !items.is_empty();
+                        if sel || reveal_all {
+                            ui.add_space(6.0);
+                            menu_divider(ui, W);
+                            ui.add_space(6.0);
+                        }
+                        if sel && menu_row(ui, W, "Mark as secret", Some("Ctrl+Shift+H"), false).clicked() {
                             chosen = Some(MenuChoice::Mark);
                         }
-                        if profile == Profile::Basic && !items.is_empty() {
+                        if reveal_all {
                             let label = if st.reveals.all {
                                 "Hide all secrets"
                             } else {
@@ -3292,7 +3393,7 @@ fn secret_menu(ctx: &egui::Context, s: &mut Session, st: &mut EditorState) {
             let security = s.vault.content.security.clone();
             copy_secret(ctx, &note.body, &item, &security);
         }
-        (Some(MenuChoice::Edit), Some(_)) => {
+        (Some(MenuChoice::EditSecret), Some(_)) => {
             st.secret_edit = Some(SecretEdit {
                 note: menu.note,
                 target: menu.target,
@@ -3315,6 +3416,10 @@ fn secret_menu(ctx: &egui::Context, s: &mut Session, st: &mut EditorState) {
             s.touch(Some(menu.note));
         }
         (Some(MenuChoice::Mark), _) => st.mark_secret = true,
+        (Some(MenuChoice::Edit(action)), _) => {
+            st.edit_action = Some(action);
+            ctx.request_repaint();
+        }
         (Some(MenuChoice::RevealAll), _) => {
             if st.reveals.all {
                 st.reveals.hide_all();
@@ -3335,10 +3440,12 @@ fn secret_menu(ctx: &egui::Context, s: &mut Session, st: &mut EditorState) {
 enum MenuChoice {
     Reveal,
     Copy,
-    Edit,
+    EditSecret,
     Unmask,
     Mark,
     RevealAll,
+    /// Cut, Copy, Paste or Select all on the text.
+    Edit(EditAction),
 }
 
 /// Edit secret / New secret: a masked field, so the value is never on

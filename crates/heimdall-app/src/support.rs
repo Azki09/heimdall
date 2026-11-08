@@ -147,6 +147,13 @@ pub fn set_clipboard(text: &str) -> bool {
     }
 }
 
+/// The text on the clipboard, for Paste in the editor's right-click menu.
+/// Wiped when dropped. `None` if the clipboard holds no text.
+pub fn clipboard_text() -> Option<zeroize::Zeroizing<String>> {
+    let text = zeroize::Zeroizing::new(arboard::Clipboard::new().ok()?.get_text().ok()?);
+    (!text.is_empty()).then_some(text)
+}
+
 /// Copies text that has no vault open to take the timer from (the recovery
 /// code in the wizard): cleared after `clear_after_s` like any other copy.
 pub fn copy_with_timer(ctx: &egui::Context, text: &str, clear_after_s: u32) {

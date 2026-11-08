@@ -425,6 +425,7 @@ El modelo es el **Bloc de notas de Windows 11**: cada nota es una pestaña. Quie
 | Reabrir pestaña cerrada | Ctrl+Shift+T | Restaura de la papelera la nota cerrada más reciente, como en el navegador |
 | Modo código | Ctrl+Shift+M | Activa o desactiva el modo código **solo en la pestaña actual** (§10.6) |
 | Ajuste de línea | Alt+Z | Activa o desactiva el ajuste de línea **solo en la pestaña actual** |
+| Menú del texto | Clic derecho | *Cut*, *Copy*, *Paste*, *Select all* en cualquier parte del texto, más *Mark as secret* sobre una selección y *Reveal all* en Basic. Sobre un secreto o una palabra mal escrita se abre su propio menú (§11.1, §10.8) |
 
 Todos los atajos aparecen en *Settings → Shortcuts*.
 
@@ -639,7 +640,8 @@ heimdall/
 | **v0.4 — Pulido** | Secretos enmascarados, detector de secretos, exclusión de capturas, endurecimiento del proceso |
 | **v0.5 — Confianza** | Fuzzing, CI con `cargo-audit`/`cargo-deny`, releases firmados, `SECURITY.md` |
 | **v1.1** | YubiKey/FIDO2 |
-| **Futuro** | Shamir 2-de-3, Linux/macOS, **menú contextual general** (clic derecho con Cut / Copy / Paste / Select all en cualquier parte del texto; hoy el clic derecho solo abre menú sobre un secreto, una palabra mal escrita, una selección o, en Basic, *Reveal all*) |
+| **v1.0** | Formato congelado (§5.6), **menú contextual general** (clic derecho con Cut / Copy / Paste / Select all en cualquier parte del texto), copia de respaldo manual, exportar (cifrado y en texto plano) |
+| **Futuro** | Shamir 2-de-3, Linux/macOS, modo terminal (editar la vault desde la consola, como nano o vim) |
 
 ### 14.1 Estado (2026-10-29)
 
@@ -724,6 +726,12 @@ Decisiones tomadas al implementar la v0.4:
   - **`SECURITY.md`** (2026-11-07): cómo reportar vulnerabilidades en privado (GitHub, *Report a vulnerability*), versiones con soporte, alcance, resumen del modelo de amenazas (§2) y cómo verificar un release.
   - **Dependencias actualizadas** (2026-11-07, los PR de Dependabot #1–#8): `argon2` 0.6, `chacha20poly1305` 0.11, `hkdf` 0.13 (con `sha2` 0.11, que exige), `getrandom` 0.4 y `windows-sys` 0.61; en los workflows, `checkout` v7, `upload-artifact` v7 y `cache` v6. Antes de actualizar se fijaron **vectores conocidos** de cada primitiva con las versiones anteriores (`crypto::tests::known_answers`) y las vaults de prueba de §5.6; con las versiones nuevas dan exactamente lo mismo. Argon2id se comparó además entre 0.5 y 0.6 con los parámetros reales (256 MiB / t = 3 / p = 4, y los del código de recuperación): idéntico. La clave de XChaCha20 se pasa con `new_from_slice` para no dejar una copia sin borrar en la pila.
   - **Releases** (`.github/workflows/release.yml`, 2026-11-07): al subir una etiqueta `v*` se corren los tests, se compila `heimdall.exe` en Windows y se publica un release de GitHub con el ejecutable, `SHA256SUMS.txt` y una **atestación de procedencia** (`actions/attest-build-provenance`, firmada con Sigstore), que liga el `.exe` al commit y a la ejecución del workflow. Se verifica con `Get-FileHash` y `gh attestation verify` (`SECURITY.md`). **Sin certificado de firma de código**: SmartScreen puede avisar la primera vez. Las atestaciones solo funcionan en repositorios públicos (o con GitHub Enterprise Cloud); mientras el repositorio sea privado, el paso se salta y el release lleva solo el hash.
+
+- **v1.0 — en curso (2026-11-07).** Formato congelado (§5.6) y menú contextual general hechos.
+  - **Menú contextual general** (§10.1): un clic derecho en el texto que no cae sobre un secreto ni sobre una palabra mal escrita abre *Cut* / *Copy* / *Paste* / *Select all* (con sus atajos a la derecha). *Cut* y *Copy* salen en gris sin selección; *Paste*, si el portapapeles no tiene texto. Debajo, *Mark as secret* (con selección) y *Reveal all secrets…* (Basic, si la nota tiene secretos).
+  - **Las acciones del menú mandan los mismos eventos que el teclado** (Ctrl+X, Ctrl+C, Ctrl+V), al cuadro siguiente, cuando el texto recupera el foco. Así una copia pasa por el mismo camino que Ctrl+C (fuera del historial y de la nube, borrado automático, temporizador corto si incluye un secreto) y lo pegado pasa por el detector de secretos (§11.3) con su Undo. Un secreto se corta o se copia entero, igual que con el teclado.
+  - **Corregido de paso:** el menú sobre una selección no sabía que había selección (no salía *Mark as secret*) cuando el botón se soltaba en un cuadro distinto del que se apretó, que es lo normal. Ahora la selección se lee al abrir el menú.
+  - **Probado a mano (debug, 2026-11-07):** menú sin selección, Paste normal, Paste con algo que parece un token (se enmascara y aparece Undo), Select all, Copy de una selección con secretos (formatos de exclusión en el portapapeles, CRLF), Cut de una línea, menú en modo código, prioridad del menú de un secreto.
 
 - **Modo código (§10.6) — hecho (2026-10-29), sin commit todavía.** Contenido versión 3. Probado a mano con una vault nueva y con una vault versión 2 creada con el código anterior.
 
