@@ -147,14 +147,36 @@ impl HeimdallApp {
     }
 
     /// Sleep always locks; Win+L too, unless a Basic vault turned it off.
-    fn session_event_lock(&self) -> Option<LockReason> {
+    /// Shutdown or sign-out with unsaved changes saves and closes.
+    fn session_event_lock(&mut self, ctx: &egui::Context) -> Option<LockReason> {
         let event = heimdall_platform::take_session_event()?;
+        if event == heimdall_platform::SessionEvent::Ending {
+            self.end_session(ctx);
+            return None;
+        }
         let security = &self.session.as_ref()?.vault.content.security;
         match event {
             heimdall_platform::SessionEvent::Suspending => Some(LockReason::Suspended),
             heimdall_platform::SessionEvent::Locked => (security.profile != Profile::Basic
                 || security.lock_on_windows_lock)
                 .then_some(LockReason::WindowsLocked),
+            heimdall_platform::SessionEvent::Ending => None,
+        }
+    }
+
+    /// Windows is waiting to shut down or sign out because of unsaved
+    /// changes (DESIGN §10.2): save, let it go on, close. If the save
+    /// fails, stay open with the error showing; Windows keeps listing
+    /// Heimdall as busy, and the person can cancel the shutdown.
+    fn end_session(&mut self, ctx: &egui::Context) {
+        let saved = match self.session.as_mut() {
+            Some(s) if s.has_unsaved() => s.save(),
+            _ => true,
+        };
+        if saved {
+            self.clipboard.clear_now();
+            heimdall_platform::allow_end_session();
+            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
         }
     }
 
@@ -378,7 +400,7 @@ impl eframe::App for HeimdallApp {
             self.clipboard.clear_now();
         }
 
-        if let Some(reason) = self.session_event_lock().or_else(|| self.auto_lock(ctx)) {
+        if let Some(reason) = self.session_event_lock(ctx).or_else(|| self.auto_lock(ctx)) {
             self.lock(ctx, reason);
         }
         if let Some(s) = self.session.as_mut() {
@@ -412,6 +434,10 @@ impl eframe::App for HeimdallApp {
         self.apply_capture_exclusion();
         let clip_due = self.clipboard.tick();
         chrome::paint_border(ctx);
+
+        // Shutdown and sign-out wait for a save while there is something
+        // to save.
+        heimdall_platform::set_unsaved(self.session.as_ref().is_some_and(|s| s.has_unsaved()));
 
         // Wake up for the lock countdown, autosave and clipboard clearing.
         let mut next = Duration::from_secs(1);

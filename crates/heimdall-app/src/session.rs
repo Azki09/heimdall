@@ -10,11 +10,15 @@ use heimdall_core::storage::{save_vault, SaveKind};
 use heimdall_core::{SlotId, SlotKind, Vault};
 use uuid::Uuid;
 
-use crate::support::{error_message, file_name};
+use crate::support::{file_name, save_error_message};
 use crate::usb::{Presence, UsbKey};
 
 /// Encrypted autosave runs this long after the last change (DESIGN §10.2).
 pub const AUTOSAVE_DELAY: Duration = Duration::from_secs(2);
+
+/// After a failed save, autosave waits this long before trying again, so a
+/// missing drive or a full disk doesn't re-encrypt and retry every second.
+pub const AUTOSAVE_RETRY: Duration = Duration::from_secs(15);
 
 /// After an access change: labels the slots that are not in `before` (just
 /// created) with today's date, naming the one `usb` opens after its drive,
@@ -45,6 +49,8 @@ pub struct Session {
     pub last_change: Instant,
     pub last_saved: Option<i64>,
     pub save_error: Option<String>,
+    /// When the last save failed, for [`AUTOSAVE_RETRY`].
+    pub save_failed_at: Option<Instant>,
     /// The USB key used to unlock (or enrolled at creation), if any.
     pub usb: Option<UsbKey>,
     /// Watching `usb`; only while the vault requires its key (DESIGN §8.3).
@@ -71,6 +77,7 @@ impl Session {
             last_change: Instant::now(),
             last_saved: None,
             save_error: None,
+            save_failed_at: None,
             usb,
             presence: None,
             access_changed: false,
@@ -139,7 +146,10 @@ impl Session {
     }
 
     pub fn autosave_due(&self) -> bool {
-        self.dirty && self.vault.content.editor.autosave && self.last_change.elapsed() >= AUTOSAVE_DELAY
+        self.dirty
+            && self.vault.content.editor.autosave
+            && self.last_change.elapsed() >= AUTOSAVE_DELAY
+            && self.save_failed_at.is_none_or(|t| t.elapsed() >= AUTOSAVE_RETRY)
     }
 
     /// Encrypts and writes the whole vault (atomic). Keeps the previous
@@ -161,11 +171,13 @@ impl Session {
                 self.dirty_notes.clear();
                 self.last_saved = Some(heimdall_core::content::now());
                 self.save_error = None;
+                self.save_failed_at = None;
                 self.access_changed = false;
                 true
             }
             Err(e) => {
-                self.save_error = Some(error_message(&e));
+                self.save_error = Some(save_error_message(&e));
+                self.save_failed_at = Some(Instant::now());
                 false
             }
         }

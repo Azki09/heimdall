@@ -12,8 +12,8 @@ use zeroize::Zeroizing;
 
 use crate::code;
 
-/// A text file bigger than this isn't imported.
-pub const MAX_IMPORT_BYTES: u64 = 10 * 1024 * 1024;
+/// A text file bigger than a note may be isn't imported.
+pub const MAX_IMPORT_BYTES: u64 = crate::support::MAX_NOTE_BYTES as u64;
 
 /// What a plain-text export does with masked secrets.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -204,7 +204,7 @@ pub fn read_text_file(path: &Path) -> Result<Note, String> {
     let name = crate::support::file_name(path);
     let len = std::fs::metadata(path).map_err(|e| format!("{name}: {e}"))?.len();
     if len > MAX_IMPORT_BYTES {
-        return Err(format!("{name} is bigger than 10 MB"));
+        return Err(format!("{name} is bigger than 2 MB, the most a note can hold"));
     }
     let bytes = Zeroizing::new(std::fs::read(path).map_err(|e| format!("{name}: {e}"))?);
     let bytes = bytes.strip_prefix(b"\xEF\xBB\xBF").unwrap_or(&bytes);

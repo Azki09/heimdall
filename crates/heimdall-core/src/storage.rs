@@ -2,8 +2,9 @@
 //! ciphertext: callers pass the bytes from [`crate::Vault::to_bytes`].
 
 use std::fs::{self, File};
-use std::io::{Read, Write};
+use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 use crate::error::{Error, Result};
 
@@ -45,7 +46,7 @@ pub fn save_vault(path: &Path, bytes: &[u8], kind: SaveKind) -> Result<()> {
         SaveKind::Normal => {
             if path.exists() {
                 // Copy (not rename) so `path` is never missing, even if we crash here.
-                let old = fs::read(path)?;
+                let old = retry(|| fs::read(path))?;
                 write_atomic(&bak, &old)?;
             }
             write_atomic(path, bytes)?;
@@ -65,18 +66,48 @@ pub fn save_vault(path: &Path, bytes: &[u8], kind: SaveKind) -> Result<()> {
 pub fn write_atomic(path: &Path, bytes: &[u8]) -> Result<()> {
     let tmp = with_suffix(path, ".tmp");
     let result = (|| {
-        let mut f = File::create(&tmp)?;
+        let mut f = retry(|| File::create(&tmp))?;
         f.write_all(bytes)?;
         f.flush()?;
         f.sync_all()?;
         drop(f);
         // On Windows this is MoveFileExW with MOVEFILE_REPLACE_EXISTING.
-        fs::rename(&tmp, path)
+        retry(|| fs::rename(&tmp, path))
     })();
     if result.is_err() {
         let _ = fs::remove_file(&tmp);
     }
     Ok(result?)
+}
+
+/// Runs a file operation again for a moment while another program holds the
+/// file: OneDrive, an antivirus or the search indexer often open a file
+/// that was just written, without letting it be replaced. About 0.8 s in
+/// all, then the error goes to the caller (and the status bar).
+fn retry<T>(mut op: impl FnMut() -> io::Result<T>) -> io::Result<T> {
+    let mut wait = Duration::from_millis(25);
+    for _ in 0..5 {
+        match op() {
+            Err(e) if is_transient(&e) => {
+                std::thread::sleep(wait);
+                wait *= 2;
+            }
+            other => return other,
+        }
+    }
+    op()
+}
+
+/// ERROR_ACCESS_DENIED (also what replacing a file that is open elsewhere
+/// gives), ERROR_SHARING_VIOLATION, ERROR_LOCK_VIOLATION.
+#[cfg(windows)]
+fn is_transient(e: &io::Error) -> bool {
+    matches!(e.raw_os_error(), Some(5 | 32 | 33))
+}
+
+#[cfg(not(windows))]
+fn is_transient(_: &io::Error) -> bool {
+    false
 }
 
 fn with_suffix(path: &Path, suffix: &str) -> PathBuf {
@@ -113,6 +144,80 @@ mod tests {
         save_vault(&p, b"new-access", SaveKind::AccessChanged).unwrap();
         assert_eq!(fs::read(&p).unwrap(), b"new-access");
         assert_eq!(fs::read(backup_path(&p)).unwrap(), b"new-access");
+    }
+
+    /// Opens `path` the way an antivirus scan might: no sharing at all.
+    #[cfg(windows)]
+    fn hold(path: &Path) -> File {
+        use std::os::windows::fs::OpenOptionsExt;
+        fs::OpenOptions::new()
+            .read(true)
+            .share_mode(0)
+            .open(path)
+            .unwrap()
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn briefly_locked_file_is_saved_after_a_retry() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("notes.heim");
+        save_vault(&p, b"v1", SaveKind::Normal).unwrap();
+        let h = hold(&p);
+        let release = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(150));
+            drop(h);
+        });
+        save_vault(&p, b"v2", SaveKind::Normal).unwrap();
+        release.join().unwrap();
+        assert_eq!(fs::read(&p).unwrap(), b"v2");
+        assert_eq!(fs::read(backup_path(&p)).unwrap(), b"v1");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn locked_file_fails_without_losing_anything() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("notes.heim");
+        save_vault(&p, b"v1", SaveKind::Normal).unwrap();
+        save_vault(&p, b"v2", SaveKind::Normal).unwrap();
+        let h = hold(&p);
+        let err = save_vault(&p, b"v3", SaveKind::Normal).unwrap_err();
+        drop(h);
+        assert!(
+            matches!(err, Error::Io(ref e) if e.raw_os_error() == Some(32)),
+            "{err:?}"
+        );
+        assert_eq!(fs::read(&p).unwrap(), b"v2");
+        assert_eq!(fs::read(backup_path(&p)).unwrap(), b"v1");
+        assert!(!with_suffix(&p, ".tmp").exists());
+    }
+
+    #[test]
+    fn read_only_vault_fails_without_losing_anything() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("notes.heim");
+        save_vault(&p, b"v1", SaveKind::Normal).unwrap();
+        let mut perm = fs::metadata(&p).unwrap().permissions();
+        perm.set_readonly(true);
+        fs::set_permissions(&p, perm.clone()).unwrap();
+        let result = save_vault(&p, b"v2", SaveKind::Normal);
+        #[allow(clippy::permissions_set_readonly_false)]
+        perm.set_readonly(false);
+        fs::set_permissions(&p, perm).unwrap();
+        assert!(result.is_err());
+        assert_eq!(fs::read(&p).unwrap(), b"v1");
+        assert!(!with_suffix(&p, ".tmp").exists());
+    }
+
+    #[test]
+    fn missing_folder_fails_cleanly() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("gone").join("notes.heim");
+        assert!(matches!(
+            save_vault(&p, b"v1", SaveKind::Normal),
+            Err(Error::Io(_))
+        ));
     }
 
     #[test]

@@ -8,6 +8,12 @@ use std::time::{Duration, Instant};
 use eframe::egui;
 use heimdall_core::Error;
 
+/// Largest note the editor accepts by paste, typing or import (DESIGN
+/// §10.1). egui lays out the whole text again on every keystroke: about
+/// 0.1 s per MB in a release build, so 2 MB is the most that still types
+/// acceptably.
+pub const MAX_NOTE_BYTES: usize = 2 * 1024 * 1024;
+
 /// Runs slow work (Argon2id takes about a second by design) off the UI
 /// thread and wakes the UI when it is done.
 pub struct Job<T> {
@@ -48,6 +54,26 @@ pub fn error_message(e: &Error) -> String {
         Error::Io(io) => format!("Couldn't access the file: {io}"),
         other => format!("{other}."),
     }
+}
+
+/// Why saving the open vault failed, in words for the cases people actually
+/// hit; the unsaved changes are still in memory in all of them. Windows
+/// error codes: 32/33 sharing/lock violation, 5 access denied, 112/39 disk
+/// full, 2/3 not found, 21 device not ready, 53/67/1167 network path or
+/// device gone.
+pub fn save_error_message(e: &Error) -> String {
+    use std::io::ErrorKind;
+    let Error::Io(io) = e else {
+        return error_message(e);
+    };
+    let text = match (io.raw_os_error(), io.kind()) {
+        (Some(32 | 33), _) => "Another program is using the vault file (OneDrive, an antivirus or a backup tool). Your changes are still here; Heimdall will try again.",
+        (Some(112 | 39), _) | (_, ErrorKind::StorageFull) => "The disk is full. Free some space; your changes are still here and the file on disk is unchanged.",
+        (Some(5), _) | (_, ErrorKind::PermissionDenied) => "Windows won't let Heimdall write the vault file. It, or its folder, may be read-only.",
+        (Some(2 | 3 | 21 | 53 | 67 | 1167), _) | (_, ErrorKind::NotFound) => "The vault's drive or folder isn't available. Reconnect it; your changes are still here.",
+        _ => return format!("Couldn't save: {io}"),
+    };
+    text.into()
 }
 
 // ---------- Recent vaults ----------

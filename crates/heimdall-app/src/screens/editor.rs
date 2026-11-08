@@ -1170,6 +1170,20 @@ fn text_area(ui: &mut Ui, s: &mut Session, st: &mut EditorState) {
         if !before.is_empty() {
             inserted |= delete_secret(&ctx, id, note, &before);
         }
+        // A paste that would make the note too big is refused whole
+        // (truncating it would lose text without saying so).
+        let room = crate::support::MAX_NOTE_BYTES.saturating_sub(note.body.len());
+        let refused = ctx.input_mut(|i| {
+            let before = i.events.len();
+            i.events
+                .retain(|e| !matches!(e, egui::Event::Paste(t) if t.len() > room));
+            i.events.len() != before
+        });
+        if refused {
+            st.toast = Some(Toast::message(
+                "That paste would make the note bigger than 2 MB. Split it into several notes.",
+            ));
+        }
         // The paste detector (§11.3) works on the text before egui inserts it.
         ctx.input_mut(|i| {
             for e in &mut i.events {
@@ -1262,6 +1276,8 @@ fn text_area(ui: &mut Ui, s: &mut Session, st: &mut EditorState) {
                 .id(id)
                 .frame(false)
                 .lock_focus(true)
+                // Typing past the cap (chars ≤ bytes, so this is a backstop).
+                .char_limit(crate::support::MAX_NOTE_BYTES)
                 .desired_width(if wrap { ui.available_width() } else { f32::INFINITY })
                 .min_size(ui.available_size())
                 .layouter(&mut layouter)

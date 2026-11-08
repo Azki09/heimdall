@@ -82,6 +82,9 @@ pub enum SessionEvent {
     Locked,
     /// The computer is going to sleep or hibernate.
     Suspending,
+    /// Windows is shutting down or signing out while there were unsaved
+    /// changes ([`set_unsaved`]): save, then [`allow_end_session`] and close.
+    Ending,
 }
 
 /// Starts watching for [`SessionEvent`]s on `window`; `wake` is called
@@ -97,12 +100,28 @@ pub fn watch_session(window: isize, wake: impl Fn() + Send + Sync + 'static) -> 
     }
 }
 
-/// The last event since the previous call; sleep wins over lock.
+/// The last event since the previous call; ending wins over sleep, and
+/// sleep over lock.
 pub fn take_session_event() -> Option<SessionEvent> {
     #[cfg(windows)]
     return harden::take_session_event();
     #[cfg(not(windows))]
     None
+}
+
+/// Whether the app has unsaved changes right now. While it does, Windows
+/// shutdown and sign-out wait for a save ([`SessionEvent::Ending`]).
+pub fn set_unsaved(unsaved: bool) {
+    #[cfg(windows)]
+    harden::set_unsaved(unsaved);
+    #[cfg(not(windows))]
+    let _ = unsaved;
+}
+
+/// Lets a shutdown held by [`SessionEvent::Ending`] go on.
+pub fn allow_end_session() {
+    #[cfg(windows)]
+    harden::allow_end_session();
 }
 
 /// USB drives currently connected: removable drives, plus fixed drives on

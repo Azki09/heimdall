@@ -244,6 +244,9 @@ Antes de cifrar, se rellena (padding) a múltiplos de 4 KiB para no revelar el t
 - En guardados normales se conserva `archivo.heim.bak` (la versión anterior, también cifrada) por si el archivo principal se corrompe.
 - **Cuando cambian los accesos** (cambio de contraseña, revocación, rotación de MK, regenerar el código), el `.bak` se **sobrescribe con la versión nueva**. Si no, seguiría abriéndose con la contraseña o el USB anteriores.
 - No se intenta "borrar de forma segura" el `.bak` viejo sobrescribiéndolo con ceros: en SSDs no está garantizado. El cifrado ya lo protege, y la rotación de la MK limita su alcance (§4.5).
+- **Si el guardado falla, no se pierde nada.** El `.bak` se escribe primero y por el mismo camino atómico; si algo falla (disco lleno, carpeta de solo lectura, USB o unidad de red desconectada), el `.tmp` se borra y el archivo principal y el `.bak` quedan como estaban. Los cambios siguen en memoria y la barra de estado dice el motivo en palabras ("The disk is full…", "The vault's drive or folder isn't available…").
+- **Archivo ocupado por otro programa.** OneDrive, el antivirus o el indexador de Windows abren a menudo un archivo recién escrito sin dejar reemplazarlo (error de uso compartido o acceso denegado). Leer, crear y renombrar se reintentan unos 0,8 s en total antes de dar el error.
+- **Tras un guardado fallido, el autoguardado espera 15 s** antes de reintentar, en lugar de volver a cifrar y escribir cada segundo. Ctrl+S siempre lo intenta en el acto.
 
 ### 5.5 Detalles fijados en la implementación (v0.1, `heimdall-core`)
 
@@ -429,6 +432,7 @@ El modelo es el **Bloc de notas de Windows 11**: cada nota es una pestaña. Quie
 
 Todos los atajos aparecen en *Settings → Shortcuts*.
 
+- **Tamaño máximo de una nota: 2 MB.** egui vuelve a maquetar todo el texto en cada tecla (unos 0,1 s por MB en release; 10 MB tardaban más de 1 s por tecla). Un pegado que pasaría del límite se rechaza entero, con un aviso, en lugar de cortarse sin decirlo; escribir se detiene en el límite, y la importación de archivos de texto (§10.9) usa el mismo límite. Una nota más grande que ya exista (de otra vault importada) se abre igual, solo que lenta.
 - **Al cerrar la última pestaña** se abre una nota vacía "Untitled", como en el Bloc de notas: el editor nunca se queda sin pestañas. Es el único caso en que aparece una pestaña sin Ctrl+T ni `+`.
 - **Los atajos que hacen algo una sola vez** (Ctrl+T, Ctrl+W, Ctrl+Shift+T, Ctrl+S, Ctrl+L, Ctrl+1…9…) **no se repiten al mantener las teclas**: antes, mantener Ctrl+T abría una pestaña por cada repetición del teclado, y Ctrl+W cerraba varias. Ctrl+Tab, F3 y el zoom sí se repiten.
 - **Con AltGr no hay atajos de Ctrl.** Windows envía AltGr como Ctrl+Alt, y AltGr escribe caracteres en muchos teclados (en polaco AltGr+L es "ł"; en español de España AltGr+2 es "@"). Antes eso podía bloquear la vault o cambiar de pestaña al escribir.
@@ -444,6 +448,7 @@ El Bloc de notas de Windows 11 no pierde lo que escribes. Aquí se hace lo mismo
 - Se guarda automáticamente unos segundos después de dejar de escribir, y **siempre antes de bloquear**.
 - Nunca se escribe texto en claro a disco: el autoguardado es el mismo guardado atómico cifrado de §5.4.
 - Se puede desactivar en la configuración (entonces, al bloquear con cambios pendientes, se guardan de todos modos para no perder trabajo).
+- **Al apagar o cerrar sesión en Windows** con cambios sin guardar (aunque el autoguardado esté desactivado), Heimdall pide a Windows que espere ("Saving your notes"), guarda, y se cierra; Windows sigue solo. Si el guardado falla, la app se queda abierta con el error y Windows la muestra como ocupada: se puede cancelar el apagado. Sin cambios pendientes no detiene nada.
 
 ### 10.3 Papelera
 - Cerrar una pestaña mueve la nota a la papelera, **dentro de la vault cifrada**.
@@ -607,7 +612,7 @@ El texto se escribe en UTF-8, con el fin de línea del ajuste del editor (§10.4
 
 - El diálogo de Windows con selección múltiple: `.txt`, `.md` y las extensiones de los lenguajes del modo código (§10.6).
 - Cada archivo se vuelve una nota nueva al final, con el nombre del archivo (con extensión) como título. Un archivo de código entra en modo código con su lenguaje; `.txt`, como nota normal.
-- Solo UTF-8 (se acepta y se quita el BOM). Un archivo que no es UTF-8 o que pasa de 10 MB se salta, y se dice cuál.
+- Solo UTF-8 (se acepta y se quita el BOM). Un archivo que no es UTF-8 o que pasa de 2 MB (el máximo de una nota, §10.1) se salta, y se dice cuál.
 - Un `{*valor*}` en el archivo queda como secreto, así que lo exportado con *Keep markers* vuelve igual.
 - La barra de estado lo recuerda: "Imported 2 files. The original files are still unencrypted on disk." Heimdall nunca toca los archivos originales.
 
