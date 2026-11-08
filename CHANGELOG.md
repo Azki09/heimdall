@@ -20,7 +20,11 @@ First stable release.
   vault after an emergency save.
 - Access management: add and revoke USB keys, change password, regenerate
   the recovery code, rotate the master key.
-- Atomic saves with a `.bak` copy of the previous version.
+- Atomic saves with a `.bak` copy of the previous version. A failed save
+  (disk full, file in use by OneDrive or an antivirus, read-only folder,
+  drive removed) never loses data: the error is explained and the changes
+  stay in memory. Files briefly locked by another program are retried.
+- Unsaved changes are saved when Windows shuts down or signs out.
 - File format frozen: format 1, content version 5, with committed test
   vaults that every future version must open.
 
@@ -39,6 +43,9 @@ First stable release.
   Mark as secret on a selection.
 - Clipboard copies are excluded from Windows clipboard history and cloud
   sync.
+- Shortcuts don't repeat while held (no burst of new tabs from a held
+  Ctrl+T) and AltGr characters never trigger Ctrl shortcuts.
+- Notes are limited to 2 MB of text, so the editor stays responsive.
 
 ### Export, import and backup
 - **Export notes…** to a new, separate `.heim` with its own password and
