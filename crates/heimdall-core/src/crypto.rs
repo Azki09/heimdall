@@ -1,7 +1,7 @@
 //! Thin wrappers over audited primitives (DESIGN §4.2). No custom crypto.
 
 use argon2::{Algorithm, Argon2, Params, Version};
-use chacha20poly1305::aead::{AeadInPlace, KeyInit};
+use chacha20poly1305::aead::{AeadInOut, KeyInit};
 use chacha20poly1305::{Tag, XChaCha20Poly1305, XNonce};
 use hkdf::Hkdf;
 use secrecy::{ExposeSecret, SecretBox};
@@ -27,13 +27,13 @@ pub fn new_key(bytes: [u8; KEY_LEN]) -> Key {
 
 pub fn random_bytes<const N: usize>() -> Result<[u8; N]> {
     let mut buf = [0u8; N];
-    getrandom::getrandom(&mut buf).map_err(|_| Error::Rng)?;
+    getrandom::fill(&mut buf).map_err(|_| Error::Rng)?;
     Ok(buf)
 }
 
 pub fn random_key() -> Result<Key> {
     let mut k = Zeroizing::new([0u8; KEY_LEN]);
-    getrandom::getrandom(k.as_mut()).map_err(|_| Error::Rng)?;
+    getrandom::fill(k.as_mut()).map_err(|_| Error::Rng)?;
     Ok(new_key(*k))
 }
 
@@ -115,7 +115,9 @@ pub fn sha256(data: &[u8]) -> [u8; 32] {
 }
 
 fn cipher(key: &Key) -> XChaCha20Poly1305 {
-    XChaCha20Poly1305::new(chacha20poly1305::Key::from_slice(key.expose_secret()))
+    // `new_from_slice` reads the key in place; building a `Key` array first
+    // would leave an unwiped copy on the stack.
+    XChaCha20Poly1305::new_from_slice(key.expose_secret()).expect("keys are 32 bytes")
 }
 
 /// Encrypts a 32-byte key (the MK) under `kek`. Returns `ciphertext || tag`.
@@ -127,7 +129,7 @@ pub fn wrap_key(
 ) -> Result<[u8; KEY_LEN + TAG_LEN]> {
     let mut buf = Zeroizing::new(*key.expose_secret());
     let tag = cipher(kek)
-        .encrypt_in_place_detached(XNonce::from_slice(nonce), aad, buf.as_mut())
+        .encrypt_inout_detached(&XNonce::from(*nonce), aad, buf.as_mut_slice().into())
         .map_err(|_| Error::Crypto)?;
     let mut out = [0u8; KEY_LEN + TAG_LEN];
     out[..KEY_LEN].copy_from_slice(buf.as_ref());
@@ -145,9 +147,9 @@ pub fn unwrap_key(
 ) -> Option<Key> {
     let mut buf = Zeroizing::new([0u8; KEY_LEN]);
     buf.copy_from_slice(&wrapped[..KEY_LEN]);
-    let tag = Tag::from_slice(&wrapped[KEY_LEN..]);
+    let tag = Tag::try_from(&wrapped[KEY_LEN..]).ok()?;
     cipher(kek)
-        .decrypt_in_place_detached(XNonce::from_slice(nonce), aad, buf.as_mut(), tag)
+        .decrypt_inout_detached(&XNonce::from(*nonce), aad, buf.as_mut_slice().into(), &tag)
         .ok()?;
     Some(new_key(*buf))
 }
@@ -155,7 +157,7 @@ pub fn unwrap_key(
 /// Encrypts `buf` in place and appends the tag.
 pub fn seal_in_place(key: &Key, nonce: &[u8; NONCE_LEN], aad: &[u8], buf: &mut Vec<u8>) -> Result<()> {
     cipher(key)
-        .encrypt_in_place(XNonce::from_slice(nonce), aad, buf)
+        .encrypt_in_place(&XNonce::from(*nonce), aad, buf)
         .map_err(|_| Error::Crypto)
 }
 
@@ -163,7 +165,7 @@ pub fn seal_in_place(key: &Key, nonce: &[u8; NONCE_LEN], aad: &[u8], buf: &mut V
 /// unspecified and must be discarded.
 pub fn open_in_place(key: &Key, nonce: &[u8; NONCE_LEN], aad: &[u8], buf: &mut Vec<u8>) -> Result<()> {
     cipher(key)
-        .decrypt_in_place(XNonce::from_slice(nonce), aad, buf)
+        .decrypt_in_place(&XNonce::from(*nonce), aad, buf)
         .map_err(|_| Error::ContentAuthFailed)
 }
 
@@ -229,5 +231,43 @@ mod tests {
         let other_secret = combine_password_keyfile(&p, &new_key([3u8; KEY_LEN]), &[0u8; 16]).unwrap();
         assert_ne!(base.expose_secret(), other_vault.expose_secret());
         assert_ne!(base.expose_secret(), other_secret.expose_secret());
+    }
+
+    fn hex(b: &[u8]) -> String {
+        b.iter().map(|x| format!("{x:02x}")).collect()
+    }
+
+    /// Fixed outputs of every primitive, recorded with the crate versions of
+    /// v0.5 (argon2 0.5, hkdf 0.12, chacha20poly1305 0.10, sha2 0.10). A
+    /// dependency update must never change them: existing vaults would stop
+    /// opening. SHA-256("abc") is the FIPS 180-2 vector.
+    #[test]
+    fn known_answers() {
+        let a = argon2id(b"password", &[7u8; SALT_LEN], FAST).unwrap();
+        assert_eq!(
+            hex(a.expose_secret()),
+            "f7ff8309c5b730e9290f02b7fe1da817f037631ac327391b38e70a43ef5cdc17"
+        );
+        let k = combine_password_keyfile(&new_key([1; 32]), &new_key([2; 32]), &[3; 16]).unwrap();
+        assert_eq!(
+            hex(k.expose_secret()),
+            "c09dd30c46a78ec0acfd7fb5104feac7349e4b7febdbfd60d44b720b254db49b"
+        );
+        let w = wrap_key(&new_key([4; 32]), &[5; NONCE_LEN], &new_key([6; 32]), b"aad").unwrap();
+        assert_eq!(
+            hex(&w),
+            "92051937c28b302c8f814feac3835b84892d6722e3fb51e6b571a252fd46a93c\
+             77324cdba0533a2a85f40d066ac51ad0"
+        );
+        let mut buf = b"hello heimdall".to_vec();
+        seal_in_place(&new_key([8; 32]), &[9; NONCE_LEN], b"hdr", &mut buf).unwrap();
+        assert_eq!(
+            hex(&buf),
+            "a30309a21679173bfd1369eb954d13f11c3177e68c7ba8775c777dba8924"
+        );
+        assert_eq!(
+            hex(&sha256(b"abc")),
+            "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+        );
     }
 }
