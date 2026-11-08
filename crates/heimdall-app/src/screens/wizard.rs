@@ -737,6 +737,15 @@ impl Wizard {
         let Some(code) = &self.code else { return };
         self.check.ui(ui, code, 460.0);
 
+        if matches!(self.mode, Mode::Create { .. }) {
+            ui.add_space(20.0);
+            keys::bullet(
+                ui,
+                "Tip:",
+                " Settings → Vault → Save a backup copy… keeps a copy on another drive.",
+            );
+        }
+
         // Hardened and Paranoid don't remember recent vaults (§6.1): the
         // vault won't be on the Welcome screen, so say where it is.
         if let Mode::Create { profile, .. } = &self.mode {

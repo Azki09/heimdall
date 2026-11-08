@@ -2773,6 +2773,7 @@ fn file_actions() -> Vec<(&'static str, Action)> {
         ("Import notes from vault…", Action::ImportVault),
         ("Export as plain text…", Action::ExportText),
         ("Import text files…", Action::ImportText),
+        ("Save a backup copy…", Action::Backup),
     ]
 }
 

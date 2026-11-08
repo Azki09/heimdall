@@ -52,6 +52,8 @@ pub enum Action {
     ExportText,
     /// "Import text files…": each file becomes a note.
     ImportText,
+    /// "Save a backup copy…" of the vault file.
+    Backup,
 }
 
 #[derive(Clone, Copy)]
@@ -192,6 +194,11 @@ impl HeimdallApp {
             Action::ImportText => {
                 if let Some(s) = self.session.as_mut() {
                     transfer::import_text_files(s);
+                }
+            }
+            Action::Backup => {
+                if let Some(s) = self.session.as_mut() {
+                    transfer::backup(s);
                 }
             }
         }

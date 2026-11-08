@@ -1,5 +1,5 @@
 //! Export and import (DESIGN §10.9): notes to a new vault, notes from
-//! another vault, and notes as plain text. Each one is a page laid out like
+//! another vault, notes as plain text, and backup copies. Each flow is a page laid out like
 //! the wizard: the steps on the left, one column, the buttons at the bottom.
 
 use std::path::{Path, PathBuf};
@@ -134,6 +134,60 @@ pub fn import_text_files(s: &mut Session) {
             .to_owned();
     }
     s.notify(text, added.is_empty());
+}
+
+/// "Save a backup copy…" (DESIGN §10.9): the vault file exactly as it is
+/// on disk, after saving pending changes, read back and compared. The
+/// result goes to the status bar.
+pub fn backup(s: &mut Session) {
+    if s.has_unsaved() && !s.save() {
+        let e = s.save_error.clone().unwrap_or_default();
+        s.notify(format!("No backup: the vault couldn't be saved first. {e}"), true);
+        return;
+    }
+    let date = chrono::Local::now().format("%Y-%m-%d");
+    let mut dialog = rfd::FileDialog::new()
+        .set_title("Save a backup copy")
+        .set_file_name(format!("{}-backup-{date}.heim", file_stem(&s.path)))
+        .add_filter("Heimdall vault", &["heim"]);
+    if let Some(dir) = s.path.parent() {
+        dialog = dialog.set_directory(dir);
+    }
+    let Some(picked) = dialog.save_file() else {
+        return;
+    };
+    let target = with_extension(picked, "heim");
+    if is_vault_file(&target, &s.path) {
+        s.notify("That is the vault itself. Choose another name or drive.", true);
+        return;
+    }
+    match copy_verified(&s.path, &target) {
+        Ok(()) => {
+            s.vault.content.last_backup = Some(heimdall_core::content::now());
+            s.touch(None);
+            s.notify(format!("Backup saved to {}", target.display()), false);
+        }
+        Err(e) => s.notify(format!("No backup: {e}"), true),
+    }
+}
+
+/// Copies `from` to `to` atomically, then reads `to` back and compares it
+/// byte for byte: some USB drives don't keep what was written (§14.1).
+/// A copy that doesn't match is deleted.
+fn copy_verified(from: &Path, to: &Path) -> Result<(), String> {
+    let bytes = heimdall_core::storage::read_vault(from).map_err(|e| error_message(&e))?;
+    write_atomic(to, &bytes).map_err(|e| error_message(&e))?;
+    match std::fs::read(to) {
+        Ok(back) if back == bytes => Ok(()),
+        Ok(_) => {
+            let _ = std::fs::remove_file(to);
+            Err("the copy on the drive doesn't match the vault. Try another drive.".into())
+        }
+        Err(e) => {
+            let _ = std::fs::remove_file(to);
+            Err(format!("the copy couldn't be read back: {e}"))
+        }
+    }
 }
 
 // ---------- The list of notes ----------
@@ -1213,5 +1267,28 @@ impl Flow for ExportText {
             }
         }
         None
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn backup_copy_is_exact_and_refuses_the_vault() {
+        let dir = std::env::temp_dir().join(format!("heimdall-backup-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let vault = dir.join("notes.heim");
+        let bytes: Vec<u8> = (0..=255u8).cycle().take(5000).collect();
+        std::fs::write(&vault, &bytes).unwrap();
+
+        let copy = dir.join("notes-backup-2026-11-07.heim");
+        copy_verified(&vault, &copy).unwrap();
+        assert_eq!(std::fs::read(&copy).unwrap(), bytes);
+
+        assert!(is_vault_file(&vault, &vault));
+        assert!(is_vault_file(&backup_path(&vault), &vault));
+        assert!(!is_vault_file(&copy, &vault));
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 }

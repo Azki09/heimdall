@@ -619,6 +619,39 @@ fn vault(ui: &mut Ui, s: &mut Session) -> Option<Action> {
     );
     ui.add_space(24.0);
 
+    widgets::label(ui, "Backup", 12.0, TEXT_MUTED);
+    let last = match s.vault.content.last_backup {
+        Some(t) => format!("Last backup: {}", long_date(t)),
+        None => "Last backup: Never".to_owned(),
+    };
+    setting_row(
+        ui,
+        "Save a backup copy",
+        Some((
+            &format!(
+                "{last}. An exact copy of the vault file, for another drive. It keeps opening with the password and USB keys it had when it was made."
+            ),
+            TEXT_MUTED,
+        )),
+        |ui| {
+            if widgets::button(ui, ButtonKind::Secondary, "Save a copy…", true, vec2(0.0, 34.0)).clicked() {
+                action = Some(Action::Backup);
+            }
+        },
+    );
+    if let Some((text, error)) = s.current_notice() {
+        ui.add_space(8.0);
+        ui.add(
+            egui::Label::new(
+                egui::RichText::new(text)
+                    .font(crate::theme::ui(12.0))
+                    .color(if error { DANGER } else { TEXT_BODY }),
+            )
+            .wrap(),
+        );
+    }
+    ui.add_space(28.0);
+
     widgets::label(ui, "Export and import", 12.0, TEXT_MUTED);
     setting_row(
         ui,
@@ -686,6 +719,16 @@ fn vault(ui: &mut Ui, s: &mut Session) -> Option<Action> {
         s.touch(None);
     }
     action
+}
+
+/// `Nov 7, 2026`
+fn long_date(ts: i64) -> String {
+    use chrono::TimeZone;
+    chrono::Local
+        .timestamp_opt(ts, 0)
+        .single()
+        .map(|t| t.format("%b %-d, %Y").to_string())
+        .unwrap_or_default()
 }
 
 pub(super) fn sync_recent(s: &Session, recent: &mut RecentVaults) {
