@@ -1739,7 +1739,9 @@ version = "0.3.0"
 dependencies = [
  "arboard",
  "chrono",
+ "crc32fast",
  "eframe",
+ "flate2",
  "heimdall-core",
  "heimdall-platform",
  "raw-window-handle",

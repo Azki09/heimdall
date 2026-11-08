@@ -23,6 +23,8 @@ zeroize = "1.8"
 uuid = "1"
 spellbook = "0.4"
 raw-window-handle = "0.6"
+flate2 = "1"
+crc32fast = "1"
 
 [lints]
 workspace = true

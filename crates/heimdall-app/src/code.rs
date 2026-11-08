@@ -891,6 +891,27 @@ pub fn by_id(id: &str) -> Option<&'static Language> {
     LANGUAGES.iter().find(|l| l.id == id)
 }
 
+impl Language {
+    /// The usual file extension ("rs"), for plain-text export (DESIGN §10.9).
+    pub fn extension(&self) -> Option<&'static str> {
+        self.extensions.first().copied()
+    }
+}
+
+/// The language a file extension belongs to (`ext` without the dot).
+pub fn by_extension(ext: &str) -> Option<&'static Language> {
+    let ext = ext.to_ascii_lowercase();
+    LANGUAGES.iter().find(|l| l.extensions.contains(&ext.as_str()))
+}
+
+/// Every extension of every language, for the Import text files dialog.
+pub fn all_extensions() -> Vec<&'static str> {
+    LANGUAGES
+        .iter()
+        .flat_map(|l| l.extensions.iter().copied())
+        .collect()
+}
+
 /// Guesses the language from the tab title's extension ("sync.ps1"), then
 /// from a `#!` line or an XML/HTML start.
 pub fn detect(note: &Note) -> Option<&'static Language> {

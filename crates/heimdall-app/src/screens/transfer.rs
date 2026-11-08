@@ -13,6 +13,7 @@ use zeroize::Zeroize;
 
 use crate::app::Action;
 use crate::chrome;
+use crate::plain::{self, Secrets};
 use crate::screens::confirm::{Outcome, PasswordCheck};
 use crate::screens::keys::{self, CodeActions, CodeCheck};
 use crate::screens::wizard::step_list;
@@ -87,6 +88,52 @@ pub fn with_extension(path: PathBuf, ext: &str) -> PathBuf {
 
 fn plural(n: usize, word: &str) -> String {
     format!("{n} {word}{}", if n == 1 { "" } else { "s" })
+}
+
+/// "Import text files…" (DESIGN §10.9): each chosen file becomes a new
+/// note. The files themselves are never touched.
+pub fn import_text_files(s: &mut Session) {
+    let mut exts = vec!["txt"];
+    for e in crate::code::all_extensions() {
+        if !exts.contains(&e) {
+            exts.push(e);
+        }
+    }
+    let mut dialog = rfd::FileDialog::new()
+        .set_title("Import text files")
+        .add_filter("Text and code", &exts)
+        .add_filter("All files", &["*"]);
+    if let Some(dir) = s.path.parent() {
+        dialog = dialog.set_directory(dir);
+    }
+    let Some(paths) = dialog.pick_files() else {
+        return;
+    };
+    let mut notes = Vec::new();
+    let mut skipped = Vec::new();
+    for p in &paths {
+        match plain::read_text_file(p) {
+            Ok(n) => notes.push(n),
+            Err(e) => skipped.push(e),
+        }
+    }
+    let added = s.vault.content.import_notes(notes);
+    for id in &added {
+        s.touch(Some(*id));
+    }
+    let mut text = String::new();
+    if !added.is_empty() {
+        text = format!(
+            "Imported {}. The original files are still unencrypted on disk.",
+            plural(added.len(), "file")
+        );
+    }
+    if !skipped.is_empty() {
+        text = format!("{text} Skipped: {}.", skipped.join("; "))
+            .trim()
+            .to_owned();
+    }
+    s.notify(text, added.is_empty());
 }
 
 // ---------- The list of notes ----------
@@ -253,12 +300,18 @@ fn button_row(
 pub enum Transfer {
     Export(Box<ExportVault>),
     Import(Box<ImportVault>),
+    Text(Box<ExportText>),
 }
 
 impl Transfer {
     /// "Export notes…", with `preselect` checked (or the active tab).
     pub fn export_vault(s: &Session, preselect: Option<Uuid>) -> Self {
         Self::Export(Box::new(ExportVault::new(s, preselect)))
+    }
+
+    /// "Export as plain text…".
+    pub fn export_text(s: &Session) -> Self {
+        Self::Text(Box::new(ExportText::new(s)))
     }
 
     /// "Import notes from vault…" from `path` (already chosen).
@@ -271,7 +324,7 @@ impl Transfer {
     pub fn holds_lock(&self) -> bool {
         match self {
             Self::Export(e) => e.code.is_some(),
-            Self::Import(_) => false,
+            Self::Import(_) | Self::Text(_) => false,
         }
     }
 
@@ -279,6 +332,7 @@ impl Transfer {
         match self {
             Self::Export(e) => e.ui(ctx, s),
             Self::Import(i) => i.ui(ctx, s),
+            Self::Text(t) => t.ui(ctx, s),
         }
     }
 }
@@ -914,6 +968,247 @@ impl Flow for ImportVault {
                 }
                 if next {
                     return Some(self.import(s));
+                }
+            }
+        }
+        None
+    }
+}
+
+// ---------- Export as plain text… ----------
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum TextStep {
+    Warning,
+    Notes,
+}
+
+pub struct ExportText {
+    step: TextStep,
+    /// Asks for the vault password after "I understand", if required.
+    needs_password: bool,
+    gate: Option<PasswordCheck>,
+    picks: Vec<Pick>,
+    secrets: Secrets,
+    error: Option<String>,
+}
+
+impl ExportText {
+    fn new(s: &Session) -> Self {
+        let content = &s.vault.content;
+        let active = content.active_note;
+        Self {
+            step: TextStep::Warning,
+            needs_password: export_needs_password(&content.security),
+            gate: None,
+            picks: picks(&content.notes, |n| Some(n.id) == active),
+            secrets: Secrets::Hide,
+            error: None,
+        }
+    }
+
+    fn ui(&mut self, ctx: &egui::Context, s: &mut Session) -> Option<Action> {
+        let action = show(ctx, s, self);
+        if let Some(gate) = self.gate.as_mut() {
+            match gate.ui(ctx, s) {
+                Outcome::Open => {}
+                Outcome::Canceled => self.gate = None,
+                Outcome::Confirmed => {
+                    self.gate = None;
+                    self.needs_password = false;
+                    self.step = TextStep::Notes;
+                }
+            }
+        }
+        action
+    }
+
+    /// Asks where to save, then writes one file, or a `.zip` for several.
+    fn export(&mut self, s: &mut Session) -> Option<Action> {
+        self.error = None;
+        let ids = chosen(&self.picks);
+        let notes: Vec<&Note> = s
+            .vault
+            .content
+            .notes
+            .iter()
+            .filter(|n| ids.contains(&n.id))
+            .collect();
+        let crlf = s.vault.content.editor.line_ending == heimdall_core::content::LineEnding::Crlf;
+        let files = plain::export_files(&notes, self.secrets, crlf);
+        let (default_name, ext) = match files.as_slice() {
+            [one] => {
+                let ext = one.name.rsplit_once('.').map_or("txt", |(_, e)| e).to_owned();
+                (one.name.clone(), ext)
+            }
+            _ => (format!("{}-notes.zip", file_stem(&s.path)), "zip".to_owned()),
+        };
+        let filter = if ext == "zip" { "Zip archive" } else { "Text file" };
+        let mut dialog = rfd::FileDialog::new()
+            .set_title("Export as plain text")
+            .set_file_name(&default_name)
+            .add_filter(filter, &[ext.as_str()]);
+        if let Some(dir) = s.path.parent() {
+            dialog = dialog.set_directory(dir);
+        }
+        let path = with_extension(dialog.save_file()?, &ext);
+        if is_vault_file(&path, &s.path) {
+            self.error = Some("That is the vault file. Choose another name.".into());
+            return None;
+        }
+        let written = match files.as_slice() {
+            [one] => write_atomic(&path, one.text.as_bytes()).map_err(|e| error_message(&e)),
+            _ => plain::zip(&files)
+                .and_then(|bytes| write_atomic(&path, &bytes).map_err(|e| error_message(&e))),
+        };
+        match written {
+            Ok(()) => {
+                s.notify(
+                    format!(
+                        "Exported {} as plain text to {}",
+                        plural(files.len(), "note"),
+                        file_name(&path)
+                    ),
+                    false,
+                );
+                Some(Action::Notes)
+            }
+            Err(e) => {
+                self.error = Some(e);
+                None
+            }
+        }
+    }
+}
+
+/// A radio button with a title and a description under it.
+fn radio(ui: &mut Ui, selected: bool, title: &str, description: &str) -> bool {
+    let (rect, resp) = ui.allocate_exact_size(vec2(COL, 44.0), egui::Sense::click());
+    let painter = ui.painter();
+    let c = egui::pos2(rect.left() + 8.0, rect.top() + 11.0);
+    painter.circle_stroke(
+        c,
+        7.0,
+        Stroke::new(1.5_f32, if resp.hovered() { TEXT_BODY } else { TEXT_MUTED }),
+    );
+    if selected {
+        painter.circle_filled(c, 4.0, TEXT);
+    }
+    painter.text(
+        egui::pos2(rect.left() + 26.0, rect.top() + 2.0),
+        egui::Align2::LEFT_TOP,
+        title,
+        crate::theme::ui(13.0),
+        if selected || resp.hovered() {
+            TEXT
+        } else {
+            TEXT_BODY
+        },
+    );
+    painter.text(
+        egui::pos2(rect.left() + 26.0, rect.top() + 21.0),
+        egui::Align2::LEFT_TOP,
+        description,
+        crate::theme::ui(12.0),
+        TEXT_MUTED,
+    );
+    if resp.hovered() {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+    }
+    resp.clicked()
+}
+
+impl Flow for ExportText {
+    fn title(&self) -> &'static str {
+        "Export as plain text"
+    }
+
+    fn steps(&self) -> Vec<&'static str> {
+        vec!["Warning", "Notes"]
+    }
+
+    fn current(&self) -> usize {
+        self.step as usize
+    }
+
+    fn body(&mut self, ui: &mut Ui, _s: &Session) {
+        match self.step {
+            TextStep::Warning => {
+                widgets::heading(ui, "Export as plain text");
+                ui.add_space(2.0);
+                widgets::paragraph(
+                    ui,
+                    "Plain text files are not encrypted. Anyone with access to this computer, its backups or its cloud sync can read them.",
+                    COL,
+                );
+                ui.add_space(20.0);
+                keys::bullet(
+                    ui,
+                    "Heimdall can't take them back.",
+                    " OneDrive, File History or the Recycle Bin may keep copies after you delete them.",
+                );
+                keys::bullet(
+                    ui,
+                    "",
+                    "To share notes safely, use Export notes… instead: it makes an encrypted vault file.",
+                );
+            }
+            TextStep::Notes => {
+                widgets::heading(ui, "Choose notes to export");
+                ui.add_space(2.0);
+                widgets::paragraph(
+                    ui,
+                    "One note is saved as a text file; several, as a .zip with one file per note.",
+                    COL,
+                );
+                ui.add_space(24.0);
+                note_list(ui, &mut self.picks);
+                ui.add_space(28.0);
+                widgets::label(ui, "Masked secrets", 12.0, TEXT_MUTED);
+                ui.add_space(10.0);
+                for (value, title, description) in [
+                    (Secrets::Hide, "Hide", "Each secret is written as [secret]."),
+                    (
+                        Secrets::Keep,
+                        "Keep markers",
+                        "Written as {*value*}. Imported again, they are masked again.",
+                    ),
+                    (Secrets::Reveal, "Reveal", "The value is written in plain text."),
+                ] {
+                    if radio(ui, self.secrets == value, title, description) {
+                        self.secrets = value;
+                    }
+                    ui.add_space(4.0);
+                }
+            }
+        }
+    }
+
+    fn buttons(&mut self, ui: &mut Ui, s: &mut Session) -> Option<Action> {
+        let error = self.error.clone();
+        match self.step {
+            TextStep::Warning => {
+                let (back, next) = button_row(ui, "Cancel", true, "I understand", true, None);
+                if back {
+                    return Some(Action::Notes);
+                }
+                if next {
+                    if self.needs_password {
+                        self.gate = Some(password_gate());
+                    } else {
+                        self.step = TextStep::Notes;
+                    }
+                }
+            }
+            TextStep::Notes => {
+                let any = self.picks.iter().any(|p| p.on);
+                let (back, next) = button_row(ui, "Back", true, "Export…", any, error.as_deref());
+                if back {
+                    self.step = TextStep::Warning;
+                    self.error = None;
+                }
+                if next {
+                    return self.export(s);
                 }
             }
         }

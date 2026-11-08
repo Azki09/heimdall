@@ -644,6 +644,29 @@ fn vault(ui: &mut Ui, s: &mut Session) -> Option<Action> {
             }
         },
     );
+    setting_row(
+        ui,
+        "Export as plain text",
+        Some(("A .txt, or a .zip for several notes. Not encrypted.", TEXT_MUTED)),
+        |ui| {
+            if widgets::button(ui, ButtonKind::Secondary, "Export…", true, vec2(0.0, 34.0)).clicked() {
+                action = Some(Action::ExportText);
+            }
+        },
+    );
+    setting_row(
+        ui,
+        "Import text files",
+        Some((
+            "Each file becomes a note. The originals stay on disk, unencrypted.",
+            TEXT_MUTED,
+        )),
+        |ui| {
+            if widgets::button(ui, ButtonKind::Secondary, "Import…", true, vec2(0.0, 34.0)).clicked() {
+                action = Some(Action::ImportText);
+            }
+        },
+    );
     let sec = &mut s.vault.content.security;
     let basic = sec.profile == Profile::Basic;
     let mut changed = false;

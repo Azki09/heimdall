@@ -48,6 +48,10 @@ pub enum Action {
     ExportNotes(Option<uuid::Uuid>),
     /// "Import notes from vault…": choose the file, then open it.
     ImportVault,
+    /// "Export as plain text…".
+    ExportText,
+    /// "Import text files…": each file becomes a note.
+    ImportText,
 }
 
 #[derive(Clone, Copy)]
@@ -180,6 +184,16 @@ impl HeimdallApp {
                 }
             }
             Action::ImportVault => self.import_vault(),
+            Action::ExportText => {
+                if let Some(s) = &self.session {
+                    self.screen = Screen::Transfer(Box::new(Transfer::export_text(s)));
+                }
+            }
+            Action::ImportText => {
+                if let Some(s) = self.session.as_mut() {
+                    transfer::import_text_files(s);
+                }
+            }
         }
     }
 
