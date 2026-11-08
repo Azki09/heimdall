@@ -1,7 +1,7 @@
 [package]
 name = "heimdall-app"
 description = "Heimdall: an encrypted notepad. No signal. No trace."
-version = "0.3.0"
+version.workspace = true
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true

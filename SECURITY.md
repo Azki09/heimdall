@@ -21,13 +21,17 @@ released, and the advisory is published with credit to the reporter
 
 ## Supported versions
 
-Heimdall is pre-1.0. Only the **latest release** receives security fixes.
-After 1.0, the latest minor version of each supported major version will.
+Security fixes go to the **latest 1.x release**. Older releases do not
+receive fixes; update to the latest version.
 
-| Version        | Supported |
-|----------------|-----------|
-| Latest release | Yes       |
-| Older releases | No        |
+| Version              | Supported |
+|----------------------|-----------|
+| Latest 1.x release   | Yes       |
+| Older 1.x releases   | No        |
+| 0.x (pre-releases)   | No        |
+
+Vaults created by any 1.x version keep opening in every later version
+(format compatibility promise, `docs/DESIGN.md` section 5.6).
 
 ## Scope
 
@@ -94,6 +98,8 @@ gh attestation verify .\heimdall.exe -R Azki09/heimdall
 
 If either check fails, do not run the file.
 
-The executable is not signed with a code-signing certificate, so Windows
+The executable is not yet signed with a code-signing certificate, so Windows
 SmartScreen may warn the first time it runs. The hash and the attestation
-are what prove the file is genuine.
+are what prove the file is genuine. Free code signing for open-source
+projects (SignPath Foundation) is planned; once approved, releases
+will also be signed.

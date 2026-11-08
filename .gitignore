@@ -12,3 +12,6 @@
 /fuzz/corpus
 /fuzz/artifacts
 /fuzz/coverage
+
+# Claude Code local state (worktrees)
+/.claude

@@ -28,16 +28,66 @@ jobs:
       - name: Tests
         run: cargo test --workspace --locked
       - name: Release build
+        # Static C runtime: runs on a clean Windows without VCRUNTIME140.dll.
+        env:
+          RUSTFLAGS: -C target-feature=+crt-static
         run: cargo build --release --locked -p heimdall-app
+      - name: Check that only system DLLs are needed
+        shell: pwsh
+        run: |
+          $vswhere = "${env:ProgramFiles(x86)}/Microsoft Visual Studio/Installer/vswhere.exe"
+          $vs = & $vswhere -latest -products * -property installationPath
+          $dumpbin = Get-ChildItem "$vs/VC/Tools/MSVC/*/bin/Hostx64/x64/dumpbin.exe" | Select-Object -First 1
+          $deps = & $dumpbin.FullName /dependents target/release/heimdall.exe | Select-String '\.dll'
+          $deps
+          if ($deps -match 'vcruntime|msvcp|api-ms-win-crt|ucrtbase') { throw "heimdall.exe depends on the C runtime DLLs" }
+      - name: Keep the unsigned build
+        id: unsigned
+        uses: actions/upload-artifact@v7
+        with:
+          name: heimdall-unsigned
+          path: target/release/heimdall.exe
+          if-no-files-found: error
+      # Code signing through SignPath Foundation (free for open source).
+      # Runs only once the project is approved and the repository has the
+      # SIGNPATH_ORGANIZATION_ID variable and SIGNPATH_API_TOKEN secret.
+      # Until then releases are unsigned (hash + attestation only).
+      - name: Sign with SignPath
+        if: ${{ vars.SIGNPATH_ORGANIZATION_ID != '' }}
+        uses: signpath/github-action-submit-signing-request@v1
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          project-slug: heimdall
+          signing-policy-slug: release-signing
+          github-artifact-id: ${{ steps.unsigned.outputs.artifact-id }}
+          wait-for-completion: true
+          output-artifact-directory: signed
       - name: Collect files and hash
         shell: pwsh
         run: |
           New-Item -ItemType Directory dist | Out-Null
-          Copy-Item target/release/heimdall.exe dist/
+          if (Test-Path signed/heimdall.exe) {
+            Copy-Item signed/heimdall.exe dist/
+          } else {
+            Copy-Item target/release/heimdall.exe dist/
+          }
           $hash = (Get-FileHash dist/heimdall.exe -Algorithm SHA256).Hash.ToLower()
           # Same layout as sha256sum: "<hash>  <file>", LF line ending.
           [IO.File]::WriteAllText("dist/SHA256SUMS.txt", "$hash  heimdall.exe`n")
           Get-Content dist/SHA256SUMS.txt
+      - name: Release notes from CHANGELOG.md
+        shell: pwsh
+        run: |
+          $version = "${{ github.ref_name }}".TrimStart('v')
+          $lines = Get-Content CHANGELOG.md
+          $start = ($lines | Select-String -SimpleMatch "## [$version]").LineNumber
+          if (-not $start) { throw "CHANGELOG.md has no section for $version" }
+          $rest = $lines[$start..($lines.Count - 1)]
+          $end = ($rest | Select-String -Pattern '^## \[|^\[[^\]]+\]: ' | Select-Object -First 1).LineNumber
+          if ($end) { $rest = $rest[0..($end - 2)] }
+          $notes = ($rest -join "`n").Trim() + "`n`nVerify the download as described in [SECURITY.md](https://github.com/${{ github.repository }}/blob/main/SECURITY.md#verifying-a-release).`n"
+          [IO.File]::WriteAllText("dist/NOTES.md", $notes)
       # Attestations need a public repository (or GitHub Enterprise Cloud).
       # While the repository is private the release ships with the hash only.
       - name: Attest build provenance
@@ -52,5 +102,5 @@ jobs:
         run: |
           gh release create "${{ github.ref_name }}" dist/heimdall.exe dist/SHA256SUMS.txt `
             --title "Heimdall ${{ github.ref_name }}" `
-            --generate-notes `
+            --notes-file dist/NOTES.md `
             --verify-tag
