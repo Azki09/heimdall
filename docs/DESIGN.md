@@ -264,6 +264,20 @@ Decisiones que este documento dejaba abiertas y que el código fija:
 | Guardado normal | El `.bak` se crea **copiando** el archivo actual (no renombrándolo), así el `.heim` nunca desaparece aunque se corte la luz a mitad del guardado |
 | Tamaño máximo que se lee | 512 MiB |
 
+### 5.6 Compatibilidad: el formato queda congelado
+
+Desde la v1.0, **formato 1 con contenido versión 4** es un compromiso: toda versión futura de Heimdall debe abrir esas vaults y leer exactamente lo mismo.
+
+- **Lo que no cambia nunca** en el formato 1: la cabecera (§5.1), los tipos de slot 1, 2 y 3 (§5.2), las primitivas y sus parámetros (§4.2, §4.3), el keyfile `.bifrost` y la forma del contenido en claro (§5.5).
+- **Para agregar datos cifrados** se sube la versión del contenido (5, 6…) y se conserva el lector de todas las anteriores, como ya se hizo de la 1 a la 4. Una vault vieja se abre y, al guardarse, pasa a la versión nueva.
+- **Para un acceso nuevo** (por ejemplo YubiKey, v1.1) se agrega un tipo de slot. Las versiones viejas lo saltan gracias a `slot_len` y siguen abriendo con los otros accesos.
+- **Solo un cambio que las versiones viejas no puedan leer** (otra cabecera, otra primitiva) sube `FORMAT_VERSION` a 2. Las versiones nuevas seguirán leyendo el formato 1.
+
+Cómo se comprueba:
+- **Vaults de prueba guardadas en el repositorio** (`crates/heimdall-core/tests/fixtures/`), escritas una sola vez con el código de la v0.5: `basic.heim` (contraseña) y `hardened.heim` (contraseña + `hardened.bifrost`), cada una con su código de recuperación. Tienen varias notas, secretos enmascarados, un `{*` escapado, una pestaña en modo código, una nota en la papelera, diccionario personal, ajustes distintos de los predeterminados y, en la Hardened, la etiqueta del USB. `tests/format_v1.rs` las abre con cada acceso y compara el contenido completo. **Nunca se regeneran para que una prueba pase**: si fallan, el cambio rompió vaults existentes.
+- **Vectores conocidos** de Argon2id, HKDF, XChaCha20-Poly1305 y SHA-256 (`crypto::tests::known_answers`), para que una actualización de dependencias no cambie ningún resultado.
+- `.gitattributes` marca `*.heim` y `*.bifrost` como binarios: nunca se les cambian los finales de línea.
+
 ---
 
 ## 6. Perfiles de seguridad

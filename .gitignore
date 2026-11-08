@@ -3,6 +3,9 @@
 *.heim.bak
 *.heim.tmp
 *.bifrost
+# Except the test vaults that freeze the format (DESIGN 5.6). No real data.
+!/crates/heimdall-core/tests/fixtures/*.heim
+!/crates/heimdall-core/tests/fixtures/*.bifrost
 
 # cargo-fuzz output
 /fuzz/target

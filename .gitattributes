@@ -1,1 +1,5 @@
 * text=auto eol=lf
+
+# Test vaults and keyfiles: compared byte for byte, never touched by git.
+*.heim binary
+*.bifrost binary
