@@ -72,6 +72,9 @@ pub struct EditorState {
     reveal: Option<(usize, usize)>,
     /// The list of all tabs, open under the `⌄` button drawn here.
     tab_menu: Option<Rect>,
+    /// The right-click menu of a tab, where it opened, and whether this is
+    /// the frame it opened in (that click must not close it again).
+    tab_context: Option<(Uuid, Pos2, bool)>,
     spell: Speller,
     /// The right-click menu of a misspelled word, while it is open.
     spell_menu: Option<SpellMenu>,
@@ -404,18 +407,14 @@ pub fn ui(ctx: &egui::Context, s: &mut Session, st: &mut EditorState, last_input
         let right_w = 200.0;
         let bar = ui.max_rect();
         let avail = (bar.width() - right_w).max(120.0);
-        // Tabs that don't fit scroll; a `⌄` button then lists them all.
+        // Tabs that don't fit scroll. The `⌄` button lists them all, with
+        // export, import and backup underneath (DESIGN §10.7, §10.9); it
+        // sits right after `+`, or at the end of the strip once it is full.
         let n = s.vault.content.notes.len().max(1) as f32;
-        let overflow = (avail - 32.0 - 4.0) / n - 4.0 < TAB_MIN_W;
-        let tabs_rect = Rect::from_min_size(
-            bar.min,
-            vec2(avail - if overflow { 36.0 } else { 0.0 }, chrome::TITLE_BAR_H),
-        );
-        if overflow {
-            tab_menu_button(ui, st, tabs_rect.right() + 2.0);
-        } else {
-            st.tab_menu = None;
-        }
+        let tabs_rect = Rect::from_min_size(bar.min, vec2(avail - 36.0, chrome::TITLE_BAR_H));
+        let tab_w = ((tabs_rect.width() - 32.0 - 4.0) / n - 4.0).clamp(TAB_MIN_W, TAB_MAX_W);
+        let used = n * (tab_w + 4.0) + 32.0;
+        tab_menu_button(ui, st, bar.left() + used.min(tabs_rect.width()) + 2.0);
         let mut tabs_ui = ui.new_child(
             egui::UiBuilder::new()
                 .max_rect(tabs_rect)
@@ -499,7 +498,12 @@ pub fn ui(ctx: &egui::Context, s: &mut Session, st: &mut EditorState, last_input
         }
     }
     toast(ctx, s, st);
-    tab_menu(ctx, s, st);
+    if let Some(a) = tab_menu(ctx, s, st) {
+        action = Some(a);
+    }
+    if let Some(a) = tab_context_menu(ctx, s, st) {
+        action = Some(a);
+    }
     // Clear of the minimap, which shows where the matches are anyway.
     let right = if code_mode { MINIMAP_W + 16.0 } else { 24.0 };
     find_bar(ctx, st, right, s.vault.content.active_note);
@@ -867,6 +871,9 @@ fn tabs(ui: &mut Ui, s: &mut Session, st: &mut EditorState, avail: f32) {
                 9.0,
                 if close_resp.hovered() { TEXT } else { TEXT_MUTED },
             );
+        }
+        if resp.secondary_clicked() {
+            st.tab_context = resp.interact_pointer_pos().map(|p| (id, p, true));
         }
         if close_resp.clicked() {
             close = Some(id);
@@ -2144,7 +2151,8 @@ fn line_col(text: &str, char_idx: usize) -> (usize, usize) {
 
 fn status_bar(ctx: &egui::Context, s: &Session, st: &mut EditorState, last_input: Instant) {
     let show = s.vault.content.editor.status_bar;
-    if !show && s.save_error.is_none() {
+    let notice = s.current_notice();
+    if !show && s.save_error.is_none() && notice.is_none() {
         return;
     }
     let note = s
@@ -2172,6 +2180,8 @@ fn status_bar(ctx: &egui::Context, s: &Session, st: &mut EditorState, last_input
                 let small = |ui: &mut Ui, t: &str| widgets::label(ui, t, 12.0, TEXT_MUTED);
                 if let Some(err) = &s.save_error {
                     widgets::label(ui, &format!("Not saved: {err}"), 12.0, DANGER);
+                } else if let Some((text, error)) = notice {
+                    widgets::label(ui, text, 12.0, if error { DANGER } else { TEXT_BODY });
                 } else {
                     small(ui, "Encrypted");
                 }
@@ -2690,18 +2700,18 @@ fn tab_menu_button(ui: &mut Ui, st: &mut EditorState, x: f32) {
     if resp.hovered() {
         ui.ctx().set_cursor_icon(CursorIcon::PointingHand);
     }
-    let clicked = resp.on_hover_text("All tabs").clicked();
+    let clicked = resp.on_hover_text("All tabs, export and import").clicked();
     st.tab_menu = match (clicked, open) {
         (true, true) | (false, false) => None,
         _ => Some(rect),
     };
 }
 
-/// Every tab, under the `⌄` button.
-fn tab_menu(ctx: &egui::Context, s: &mut Session, st: &mut EditorState) {
-    let Some(anchor) = st.tab_menu else {
-        return;
-    };
+/// Every tab, under the `⌄` button, then export, import and backup
+/// (DESIGN §10.9).
+fn tab_menu(ctx: &egui::Context, s: &mut Session, st: &mut EditorState) -> Option<Action> {
+    let anchor = st.tab_menu?;
+    let mut action = None;
     const W: f32 = 288.0;
     let mut close = ctx.input_mut(|i| i.consume_key(Modifiers::NONE, Key::Escape));
     let mut chosen = None;
@@ -2731,6 +2741,14 @@ fn tab_menu(ctx: &egui::Context, s: &mut Session, st: &mut EditorState) {
                         }
                     });
                 ui.add_space(6.0);
+                menu_divider(ui, W);
+                ui.add_space(6.0);
+                for (text, a) in file_actions() {
+                    if menu_row(ui, W, text, None, false).clicked() {
+                        action = Some(a);
+                    }
+                }
+                ui.add_space(6.0);
             });
         });
     let pointer = ctx.input(|i| i.pointer.interact_pos());
@@ -2741,10 +2759,75 @@ fn tab_menu(ctx: &egui::Context, s: &mut Session, st: &mut EditorState) {
         s.vault.content.active_note = Some(id);
         close = true;
     }
-    if close {
+    if close || action.is_some() {
         st.tab_menu = None;
         st.focus_editor = true;
     }
+    action
+}
+
+/// The export, import and backup entries of the `⌄` menu.
+fn file_actions() -> Vec<(&'static str, Action)> {
+    vec![
+        ("Export notes…", Action::ExportNotes(None)),
+        ("Import notes from vault…", Action::ImportVault),
+    ]
+}
+
+/// Right-click on a tab: Rename, Export this note…, Close tab.
+fn tab_context_menu(ctx: &egui::Context, s: &mut Session, st: &mut EditorState) -> Option<Action> {
+    let (id, at, fresh) = st.tab_context?;
+    if s.vault.content.note(id).is_none() {
+        st.tab_context = None;
+        return None;
+    }
+    const W: f32 = 220.0;
+    let mut close = ctx.input_mut(|i| i.consume_key(Modifiers::NONE, Key::Escape));
+    let mut action = None;
+    let mut rename = false;
+    let mut close_tab = false;
+    let area = egui::Area::new(egui::Id::new("tab_context_menu"))
+        .order(egui::Order::Foreground)
+        .fixed_pos(at + vec2(2.0, 2.0))
+        .constrain(true)
+        .show(ctx, |ui| {
+            popup_frame().show(ui, |ui| {
+                ui.set_width(W);
+                ui.spacing_mut().item_spacing.y = 0.0;
+                ui.add_space(6.0);
+                rename = menu_row(ui, W, "Rename", Some("Double-click"), false).clicked();
+                if menu_row(ui, W, "Export this note…", None, false).clicked() {
+                    action = Some(Action::ExportNotes(Some(id)));
+                }
+                menu_divider(ui, W);
+                close_tab = menu_row(ui, W, "Close tab", Some("Ctrl+W"), false).clicked();
+                ui.add_space(6.0);
+            });
+        });
+    if area.response.clicked_elsewhere() && !fresh {
+        close = true;
+    }
+    if let Some((_, _, f)) = st.tab_context.as_mut() {
+        *f = false;
+    }
+    if rename {
+        let title = s
+            .vault
+            .content
+            .note(id)
+            .map(|n| n.title.clone())
+            .unwrap_or_default();
+        st.renaming = Some((id, title));
+    }
+    if close_tab {
+        s.vault.content.close_note(id, heimdall_core::content::now());
+        s.touch(None);
+        st.focus_editor = true;
+    }
+    if close || rename || close_tab || action.is_some() {
+        st.tab_context = None;
+    }
+    action
 }
 
 fn tab_row(ui: &mut Ui, title: &str, code_mode: bool, dirty: bool, selected: bool) -> egui::Response {

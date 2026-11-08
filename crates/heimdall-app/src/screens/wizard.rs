@@ -257,34 +257,8 @@ impl Wizard {
 
     fn steps_ui(&self, ui: &mut Ui) {
         let current = self.steps().iter().position(|s| *s == self.step).unwrap_or(0);
-        for (i, step) in self.steps().iter().enumerate() {
-            let (rect, _) = ui.allocate_exact_size(vec2(176.0, 18.0), Sense::hover());
-            let c = pos2(rect.left() + 8.0, rect.center().y);
-            let painter = ui.painter();
-            let color = match i.cmp(&current) {
-                std::cmp::Ordering::Less => {
-                    painter.circle_filled(c, 8.0, TRACK_OFF);
-                    widgets::icon_check(painter, c, 10.0, TEXT_SECONDARY);
-                    TEXT_MUTED
-                }
-                std::cmp::Ordering::Equal => {
-                    painter.circle_stroke(c, 7.25, Stroke::new(1.5_f32, TEXT));
-                    TEXT
-                }
-                std::cmp::Ordering::Greater => {
-                    painter.circle_stroke(c, 7.25, Stroke::new(1.5_f32, STEP_TODO));
-                    STEP_TODO_TEXT
-                }
-            };
-            painter.text(
-                pos2(rect.left() + 28.0, rect.center().y),
-                Align2::LEFT_CENTER,
-                step.label(),
-                crate::theme::ui(13.0),
-                color,
-            );
-            ui.add_space(18.0);
-        }
+        let labels: Vec<&str> = self.steps().iter().map(|s| s.label()).collect();
+        step_list(ui, &labels, current);
     }
 
     fn buttons_ui(&mut self, ui: &mut Ui) -> Option<Action> {
@@ -778,6 +752,38 @@ impl Wizard {
                 );
             }
         }
+    }
+}
+
+/// The step list on the left of the wizard and the export pages.
+pub fn step_list(ui: &mut Ui, labels: &[&str], current: usize) {
+    for (i, label) in labels.iter().enumerate() {
+        let (rect, _) = ui.allocate_exact_size(vec2(176.0, 18.0), Sense::hover());
+        let c = pos2(rect.left() + 8.0, rect.center().y);
+        let painter = ui.painter();
+        let color = match i.cmp(&current) {
+            std::cmp::Ordering::Less => {
+                painter.circle_filled(c, 8.0, TRACK_OFF);
+                widgets::icon_check(painter, c, 10.0, TEXT_SECONDARY);
+                TEXT_MUTED
+            }
+            std::cmp::Ordering::Equal => {
+                painter.circle_stroke(c, 7.25, Stroke::new(1.5_f32, TEXT));
+                TEXT
+            }
+            std::cmp::Ordering::Greater => {
+                painter.circle_stroke(c, 7.25, Stroke::new(1.5_f32, STEP_TODO));
+                STEP_TODO_TEXT
+            }
+        };
+        painter.text(
+            pos2(rect.left() + 28.0, rect.center().y),
+            Align2::LEFT_CENTER,
+            *label,
+            crate::theme::ui(13.0),
+            color,
+        );
+        ui.add_space(18.0);
     }
 }
 

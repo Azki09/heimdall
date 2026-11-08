@@ -52,7 +52,13 @@ pub struct Session {
     /// The slots changed since the last save: the next save also replaces
     /// the `.bak`, or it would keep opening the old way (DESIGN §5.4).
     pub access_changed: bool,
+    /// A message for the status bar ("Exported 3 notes to …"), and when it
+    /// was set. Shown for [`NOTICE_FOR`]. `true` = an error.
+    pub notice: Option<(String, bool, Instant)>,
 }
+
+/// How long a status bar notice stays.
+pub const NOTICE_FOR: Duration = Duration::from_secs(10);
 
 impl Session {
     pub fn new(ctx: &egui::Context, vault: Vault, path: PathBuf, usb: Option<UsbKey>) -> Self {
@@ -68,6 +74,7 @@ impl Session {
             usb,
             presence: None,
             access_changed: false,
+            notice: None,
         };
         s.update_presence(ctx);
         s.lock_key_memory();
@@ -112,6 +119,19 @@ impl Session {
         if let Some(id) = note {
             self.dirty_notes.insert(id);
         }
+    }
+
+    /// Shows `text` in the status bar for a while.
+    pub fn notify(&mut self, text: impl Into<String>, error: bool) {
+        self.notice = Some((text.into(), error, Instant::now()));
+    }
+
+    /// The current notice, if it hasn't expired.
+    pub fn current_notice(&self) -> Option<(&str, bool)> {
+        self.notice
+            .as_ref()
+            .filter(|(_, _, at)| at.elapsed() < NOTICE_FOR)
+            .map(|(t, e, _)| (t.as_str(), *e))
     }
 
     pub fn has_unsaved(&self) -> bool {

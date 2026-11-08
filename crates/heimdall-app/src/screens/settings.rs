@@ -1,5 +1,5 @@
-//! Settings: Security, Access, Editor, Shortcuts, Trash and About
-//! (Settings mockups).
+//! Settings: Security, Access, Vault, Editor, Shortcuts, Trash and About
+//! (Settings mockups; Vault is DESIGN §10.9).
 //! Access lives in its own module, `access.rs`.
 
 use eframe::egui::{self, pos2, vec2, Align2, CornerRadius, CursorIcon, Sense, Stroke, StrokeKind, Ui};
@@ -22,6 +22,7 @@ enum Page {
     #[default]
     Security,
     Access,
+    Vault,
     Editor,
     Shortcuts,
     Trash,
@@ -92,6 +93,7 @@ impl Settings {
                 for (page, label) in [
                     (Page::Security, "Security"),
                     (Page::Access, "Access"),
+                    (Page::Vault, "Vault"),
                     (Page::Editor, "Editor"),
                     (Page::Shortcuts, "Shortcuts"),
                     (Page::Trash, "Trash"),
@@ -130,6 +132,11 @@ impl Settings {
                                 security(ui, s, recent, &mut self.access, &mut self.capture_check)
                             }
                             Page::Access => self.access.page(ui, s),
+                            Page::Vault => {
+                                if let Some(a) = vault(ui, s) {
+                                    action = Some(a);
+                                }
+                            }
                             Page::Editor => editor(ui, s),
                             Page::Shortcuts => shortcuts(ui),
                             Page::Trash => self.trash(ui, s),
@@ -598,6 +605,64 @@ fn security(
         }
         s.touch(None);
     }
+}
+
+/// Settings → Vault: export, import and backup copies (DESIGN §10.9).
+fn vault(ui: &mut Ui, s: &mut Session) -> Option<Action> {
+    let mut action = None;
+    widgets::heading(ui, "Vault");
+    widgets::label(
+        ui,
+        "Copies of your notes, inside and outside the vault.",
+        14.0,
+        TEXT_MUTED,
+    );
+    ui.add_space(24.0);
+
+    widgets::label(ui, "Export and import", 12.0, TEXT_MUTED);
+    setting_row(
+        ui,
+        "Export notes",
+        Some((
+            "To a new vault file with its own password and recovery code.",
+            TEXT_MUTED,
+        )),
+        |ui| {
+            if widgets::button(ui, ButtonKind::Secondary, "Export notes…", true, vec2(0.0, 34.0)).clicked()
+            {
+                action = Some(Action::ExportNotes(None));
+            }
+        },
+    );
+    setting_row(
+        ui,
+        "Import notes from a vault",
+        Some(("Copies notes from another .heim file as new tabs.", TEXT_MUTED)),
+        |ui| {
+            if widgets::button(ui, ButtonKind::Secondary, "Import…", true, vec2(0.0, 34.0)).clicked() {
+                action = Some(Action::ImportVault);
+            }
+        },
+    );
+    let sec = &mut s.vault.content.security;
+    let basic = sec.profile == Profile::Basic;
+    let mut changed = false;
+    setting_row(
+        ui,
+        "Ask for password before exporting",
+        Some(("Exporting takes notes out of the vault.", TEXT_MUTED)),
+        |ui| {
+            if basic {
+                changed = widgets::toggle(ui, &mut sec.ask_password_export).changed();
+            } else {
+                widgets::label(ui, "Always on", 13.0, TEXT_MUTED);
+            }
+        },
+    );
+    if changed {
+        s.touch(None);
+    }
+    action
 }
 
 pub(super) fn sync_recent(s: &Session, recent: &mut RecentVaults) {

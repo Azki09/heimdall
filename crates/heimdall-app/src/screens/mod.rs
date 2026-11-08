@@ -3,6 +3,7 @@ pub mod confirm;
 pub mod editor;
 pub mod keys;
 pub mod settings;
+pub mod transfer;
 pub mod unlock;
 pub mod welcome;
 pub mod wizard;

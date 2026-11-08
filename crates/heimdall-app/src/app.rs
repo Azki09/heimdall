@@ -12,6 +12,7 @@ use zeroize::Zeroize;
 
 use crate::screens::editor::EditorState;
 use crate::screens::settings::Settings;
+use crate::screens::transfer::{self, Transfer};
 use crate::screens::unlock::{LockInfo, Unlock};
 use crate::screens::welcome::Welcome;
 use crate::screens::wizard::Wizard;
@@ -43,6 +44,10 @@ pub enum Action {
     /// Settings, open on the keyboard shortcuts.
     Shortcuts,
     Notes,
+    /// "Export notes…", with this tab checked (DESIGN §10.9).
+    ExportNotes(Option<uuid::Uuid>),
+    /// "Import notes from vault…": choose the file, then open it.
+    ImportVault,
 }
 
 #[derive(Clone, Copy)]
@@ -61,6 +66,8 @@ enum Screen {
     Wizard(Box<Wizard>),
     Editor,
     Settings(Box<Settings>),
+    /// Export or import (DESIGN §10.9).
+    Transfer(Box<Transfer>),
 }
 
 pub struct HeimdallApp {
@@ -167,7 +174,34 @@ impl HeimdallApp {
             Action::Settings => self.screen = Screen::Settings(Box::default()),
             Action::Shortcuts => self.screen = Screen::Settings(Box::new(Settings::shortcuts())),
             Action::Notes => self.screen = Screen::Editor,
+            Action::ExportNotes(preselect) => {
+                if let Some(s) = &self.session {
+                    self.screen = Screen::Transfer(Box::new(Transfer::export_vault(s, preselect)));
+                }
+            }
+            Action::ImportVault => self.import_vault(),
         }
+    }
+
+    /// Chooses the vault to import from; never the open one.
+    fn import_vault(&mut self) {
+        let Some(s) = self.session.as_mut() else {
+            return;
+        };
+        let mut dialog = rfd::FileDialog::new()
+            .set_title("Import notes from vault")
+            .add_filter("Heimdall vault", &["heim"]);
+        if let Some(dir) = s.path.parent() {
+            dialog = dialog.set_directory(dir);
+        }
+        let Some(path) = dialog.pick_file() else {
+            return;
+        };
+        if transfer::same_file(&path, &s.path) {
+            s.notify("That is the vault that is open. Choose another one.", true);
+            return;
+        }
+        self.screen = Screen::Transfer(Box::new(Transfer::import_vault(path)));
     }
 
     fn opened(&mut self, ctx: &egui::Context, mut vault: Vault, path: PathBuf, usb: Option<UsbKey>) {
@@ -233,7 +267,9 @@ impl HeimdallApp {
         }
         // Not while a new recovery code is on screen or keys are being
         // changed: locking then would lose the code (it is already saved).
-        if matches!(&self.screen, Screen::Settings(page) if page.holds_lock()) {
+        if matches!(&self.screen, Screen::Settings(page) if page.holds_lock())
+            || matches!(&self.screen, Screen::Transfer(t) if t.holds_lock())
+        {
             return None;
         }
         let security = &session.vault.content.security;
@@ -340,6 +376,10 @@ impl eframe::App for HeimdallApp {
             },
             Screen::Settings(page) => match self.session.as_mut() {
                 Some(s) => page.ui(ctx, s, &mut self.recent),
+                None => Some(Action::Welcome),
+            },
+            Screen::Transfer(t) => match self.session.as_mut() {
+                Some(s) => t.ui(ctx, s),
                 None => Some(Action::Welcome),
             },
         };
