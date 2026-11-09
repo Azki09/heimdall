@@ -44,7 +44,9 @@ gh attestation verify .\heimdall.exe -R Azki09/heimdall
 
 The executable is not yet signed with a code-signing certificate, so the
 first time it runs Windows SmartScreen may show "Windows protected your
-PC". If the hash matches, choose **More info → Run anyway**.
+PC". If the hash matches, choose **More info → Run anyway**. Signing is
+planned through the SignPath Foundation; see
+[Code signing policy](#code-signing-policy).
 
 ## Getting started
 
@@ -134,6 +136,21 @@ Run the tests with `cargo test --workspace`. Fuzzing targets are in
 
 Please report vulnerabilities privately, as described in
 [`SECURITY.md`](SECURITY.md). Do not open a public issue.
+
+## Code signing policy
+
+Free code signing provided by [SignPath.io](https://signpath.io), certificate
+by [SignPath Foundation](https://signpath.org).
+
+- Committers and reviewers: [Azki09](https://github.com/Azki09)
+- Approvers: [Azki09](https://github.com/Azki09)
+
+Release binaries are built by GitHub Actions from tagged source in this
+repository. Only those builds are signed.
+
+**Privacy:** this program will not transfer any information to other
+networked systems unless specifically requested by the user or the person
+installing or operating it. Heimdall has no network code.
 
 ## License
 
