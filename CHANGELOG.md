@@ -92,4 +92,5 @@ First stable release.
 - Releases built by GitHub Actions with a statically linked C runtime,
   published with SHA-256 checksums and a build provenance attestation.
 
+[1.1.0]: https://github.com/Azki09/heimdall/releases/tag/v1.1.0
 [1.0.0]: https://github.com/Azki09/heimdall/releases/tag/v1.0.0
