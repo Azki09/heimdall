@@ -34,7 +34,7 @@ const MASK_EMS: f32 = 3.6;
 /// How long a click on Reveal shows a secret (DESIGN §11.1).
 pub const REVEAL_SECONDS: f64 = 5.0;
 
-const BLOCK: Color32 = Color32::from_rgb(0x26, 0x26, 0x26);
+const BLOCK: Color32 = Color32::from_rgb(0x2E, 0x2E, 0x2E);
 
 /// A secret of the note on screen, as byte and char ranges (with its
 /// delimiters), and whether its value is showing.
@@ -381,7 +381,7 @@ impl Screen<'_> {
     }
 }
 
-const ICON_MUTED: Color32 = Color32::from_rgb(0x7A, 0x7A, 0x7A);
+const ICON_MUTED: Color32 = Color32::from_rgb(0x82, 0x82, 0x82);
 
 // ---------- Caret ----------
 

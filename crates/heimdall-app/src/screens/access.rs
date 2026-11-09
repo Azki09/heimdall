@@ -469,7 +469,7 @@ impl Access {
                     nc.confirming = false;
                 }
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    let enter = complete && ui.input(|i| i.key_pressed(egui::Key::Enter));
+                    let enter = complete && crate::focus::enter_submits(ui);
                     if widgets::button(ui, ButtonKind::Primary, "Done", complete, vec2(0.0, 40.0)).clicked()
                         || enter
                     {

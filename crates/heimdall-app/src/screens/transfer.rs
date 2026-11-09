@@ -344,7 +344,12 @@ fn button_row(
 ) -> (bool, bool) {
     let mut out = (false, false);
     ui.horizontal(|ui| {
-        if widgets::button(ui, ButtonKind::Secondary, back, back_enabled, vec2(0.0, 40.0)).clicked() {
+        // Escape does what Back / Cancel does (DESIGN §10.10), never Skip or
+        // "Show the words again" on the recovery code steps.
+        let escapes = back_enabled && matches!(back, "Back" | "Cancel");
+        if widgets::button(ui, ButtonKind::Secondary, back, back_enabled, vec2(0.0, 40.0)).clicked()
+            || (escapes && crate::focus::escape(ui.ctx()))
+        {
             out.0 = true;
         }
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -730,7 +735,7 @@ impl Flow for ExportVault {
                     (false, false) => "Export…",
                 };
                 let (back, next) = button_row(ui, "Back", !busy, label, ready, error.as_deref());
-                let enter = ready && ui.input(|i| i.key_pressed(egui::Key::Enter));
+                let enter = ready && crate::focus::enter_submits(ui);
                 if back {
                     self.step = ExportStep::Notes;
                     self.error = None;
@@ -1026,7 +1031,7 @@ impl Flow for ImportVault {
                 let label = if self.job.is_some() { "Opening…" } else { "Open" };
                 let (back, next) =
                     button_row(ui, "Cancel", self.job.is_none(), label, ready, error.as_deref());
-                let enter = ready && ui.input(|i| i.key_pressed(egui::Key::Enter));
+                let enter = ready && crate::focus::enter_submits(ui);
                 if back {
                     return Some(Action::Notes);
                 }

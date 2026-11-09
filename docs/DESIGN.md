@@ -428,7 +428,9 @@ El modelo es el **Bloc de notas de Windows 11**: cada nota es una pestaña. Quie
 | Reabrir pestaña cerrada | Ctrl+Shift+T | Restaura de la papelera la nota cerrada más reciente, como en el navegador |
 | Modo código | Ctrl+Shift+M | Activa o desactiva el modo código **solo en la pestaña actual** (§10.6) |
 | Ajuste de línea | Alt+Z | Activa o desactiva el ajuste de línea **solo en la pestaña actual** |
-| Menú del texto | Clic derecho | *Cut*, *Copy*, *Paste*, *Select all* en cualquier parte del texto, más *Mark as secret* sobre una selección y *Reveal all* en Basic. Sobre un secreto o una palabra mal escrita se abre su propio menú (§11.1, §10.8) |
+| Menú del texto | Clic derecho / Shift+F10 / tecla Menú | *Cut*, *Copy*, *Paste*, *Select all* en cualquier parte del texto, más *Mark as secret* sobre una selección y *Reveal all* en Basic. Sobre un secreto o una palabra mal escrita se abre su propio menú (§11.1, §10.8). Con el teclado se abre en el cursor (§10.10) |
+| Menú ⌄ de pestañas | Ctrl+Shift+E / botón `⌄` | Todas las pestañas, exportar, importar y copia de respaldo (§10.9) |
+| Cambiar de zona | F6 / Shift+F6 | Barra de pestañas → texto → barra de estado (§10.10) |
 
 Todos los atajos aparecen en *Settings → Shortcuts*.
 
@@ -629,6 +631,36 @@ El texto se escribe en UTF-8, con el fin de línea del ajuste del editor (§10.4
 Página nueva, entre *Access* y *Editor*: *Save a backup copy…* con la fecha del último respaldo; las cuatro acciones de exportar e importar; y *Ask for password before exporting* (en Hardened y Paranoid, "Always on").
 
 ---
+
+### 10.10 Teclado y contraste (v1.1)
+
+Todo se puede usar sin ratón. **No hay soporte para lector de pantalla**, a propósito: leería en voz alta el contenido de las notas.
+
+**Foco visible.** Tab / Shift+Tab recorren los controles de cada pantalla y diálogo; las flechas se mueven entre controles vecinos (filas de un menú, vaults recientes, menú lateral de Settings, tarjetas de perfil). Espacio o Enter presionan el control con el foco, también interruptores y casillas. Alrededor del control con el foco se dibuja un **anillo gris** (`#9A9A9A`, 1,5 px), pero **solo mientras se usa el teclado**: cualquier clic lo esconde, así que con el ratón la app se ve como antes. Los campos de texto no llevan anillo: ya muestran el foco con su borde (`border-focus`) y el cursor.
+
+**Esc y Enter en los diálogos.**
+- Esc hace lo mismo que *Cancel* o *Back* en todos los diálogos y asistentes. Un menú o diálogo encima toma Esc primero. **No hay Esc en los pasos del código de recuperación** (*Skip*, *Show the words again*, el paso de las palabras del asistente): no deben saltarse por accidente.
+- Enter confirma el diálogo, salvo cuando el foco está en otro botón (por ejemplo *Back*): entonces Enter presiona ese botón y no también el principal.
+
+**Menús.** Shift+F10 o la tecla Menú abren el menú del clic derecho **en el cursor de texto**. Si el cursor está junto a un secreto, sale el menú del secreto (Reveal, Copy, Edit, Unmask), así los secretos se revelan y copian sin ratón; sobre una palabra mal escrita, sus sugerencias. Ctrl+Shift+E abre el menú ⌄ de pestañas. Un menú abierto con el teclado pone el foco en su primera fila; las flechas recorren las filas, Enter elige y Esc cierra y devuelve el foco al texto. egui no conoce la tecla Menú: la ve el procedimiento de ventana de `heimdall-platform` (`VK_APPS` y el `WM_CONTEXTMENU` de teclado, `lparam = -1`).
+
+**F6.** Dentro del texto Tab inserta espacios (§10.4), así que no sirve para salir. F6 mueve el foco barra de pestañas (pestaña activa) → texto → barra de estado (botón del lenguaje) → barra de pestañas; Shift+F6 al revés. En la barra de pestañas las flechas cambian de pestaña y Espacio la activa.
+
+**Contraseñas.** El ojo de los campos de contraseña sigue siendo solo de ratón (si Tab llegara a él, un espacio lo activaría). **Alt+F8** muestra u oculta la contraseña del campo con el foco, igual que en la pantalla de inicio de sesión de Windows.
+
+**Contraste (WCAG AA: 4,5:1 texto, 3:1 íconos y bordes de foco).** Reporte: https://claude.ai/artifact/Urqxd8kJTkYjf5FAoVcW86. Cambios:
+
+| Qué | Antes | Ahora | Contraste |
+|---|---|---|---|
+| Texto tenue (`TEXT_FAINT`: ayudas de los campos, ícono de código en pestañas inactivas, "No signal. No trace.") | `#6E6E6E` | `#848484` | 3,6 → 4,9 |
+| Controles desactivados y logo (`TEXT_DIM`, nuevo) | `#6E6E6E` | igual | sin mínimo |
+| Íconos en reposo (Reveal/Copy de secretos, ojo de contraseña, pasos pendientes del asistente) | `#7A7A7A` | `#828282` | 4,3 → 4,7 |
+| Borde del campo con el foco (`BORDER_FOCUS`) | `#4A4A4A` | `#646464` | 2,1 → 3,1 |
+| Borde normal (`BORDER`) | `#2C2C2C` | `#3A3A3A` | 1,3 → 1,6 (punto medio a propósito: el mínimo estricto, `#676767`, rompería el estilo) |
+| Rectángulo del secreto enmascarado | `#262626` | `#2E2E2E` | 1,2 → 1,4 |
+| Selección de texto | `#3A3A3A` | `#444444` | 1,6 → 1,9 |
+
+Las guías de indentación del modo código se quedan en `#2C2C2C`: van detrás del código, no alrededor de un control.
 
 ## 11. Funciones del editor relacionadas con seguridad
 
@@ -854,8 +886,8 @@ Minimalista: casi todo en grises. El color solo aparece en indicadores de estado
 |---|---|---|
 | `bg` | `#141414` | Ventana, barra de pestañas, barra de estado |
 | `surface` | `#1B1B1B` | Área del editor, pestaña activa, campos de texto |
-| `chip` | `#252525` | Fondo de los secretos enmascarados |
-| `border` | `#262626` / `#2C2C2C` | Separadores, bordes de botones |
+| `chip` | `#2E2E2E` | Fondo de los secretos enmascarados (v1.1, §10.10) |
+| `border` | `#222222` / `#3A3A3A` | Separadores / bordes de campos y botones (v1.1, §10.10) |
 | `text` | `#E4E4E4` | Texto principal |
 | `text-body` | `#D4D4D4` | Texto del editor |
 | `text-muted` | `#8A8A8A` | Etiquetas, pestañas inactivas, barra de estado |

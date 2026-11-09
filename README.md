@@ -81,6 +81,30 @@ planned through the SignPath Foundation; see
   or *Settings → Vault*) copies the encrypted vault to another drive. The
   copy opens with the same password, USB key and recovery code.
 
+## Keyboard
+
+Everything works without a mouse. The full list is in *Settings → Shortcuts*.
+
+| Action | Keys |
+|---|---|
+| New / close tab | `Ctrl+T` / `Ctrl+W` |
+| Reopen closed tab | `Ctrl+Shift+T` |
+| Next / previous tab | `Ctrl+Tab` / `Ctrl+Shift+Tab` |
+| Go to tab 1–8 / last | `Ctrl+1…8` / `Ctrl+9` |
+| All tabs, export and import | `Ctrl+Shift+E` |
+| Save / lock | `Ctrl+S` / `Ctrl+L` |
+| Settings | `Ctrl+,` |
+| Find in note / in all notes | `Ctrl+F` / `Ctrl+Shift+F` |
+| Next / previous match | `F3` / `Shift+F3` |
+| Mark selection as secret | `Ctrl+Shift+H` |
+| Code mode / word wrap for this tab | `Ctrl+Shift+M` / `Alt+Z` |
+| Zoom in / out / reset | `Ctrl++` / `Ctrl+-` / `Ctrl+0` |
+| Right-click menu at the cursor | `Shift+F10` or the Menu key |
+| Move between tab bar, text and status bar | `F6` / `Shift+F6` |
+| Show or hide the password being typed | `Alt+F8` |
+| Next / previous control, press it | `Tab` / `Shift+Tab`, `Space` or `Enter` |
+| Close a menu or cancel a dialog | `Esc` |
+
 ## Moving notes in and out
 
 From the `⌄` menu next to the tabs:

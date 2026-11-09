@@ -10,14 +10,16 @@ use heimdall_core::content::Font;
 pub const BG: Color32 = Color32::from_rgb(0x14, 0x14, 0x14);
 pub const SURFACE: Color32 = Color32::from_rgb(0x1B, 0x1B, 0x1B);
 pub const NAV_ACTIVE: Color32 = Color32::from_rgb(0x1E, 0x1E, 0x1E);
-pub const BORDER: Color32 = Color32::from_rgb(0x2C, 0x2C, 0x2C);
+pub const BORDER: Color32 = Color32::from_rgb(0x3A, 0x3A, 0x3A);
 pub const DIVIDER: Color32 = Color32::from_rgb(0x22, 0x22, 0x22);
-pub const BORDER_FOCUS: Color32 = Color32::from_rgb(0x4A, 0x4A, 0x4A);
+pub const BORDER_FOCUS: Color32 = Color32::from_rgb(0x64, 0x64, 0x64);
 pub const TEXT: Color32 = Color32::from_rgb(0xE4, 0xE4, 0xE4);
 pub const TEXT_BODY: Color32 = Color32::from_rgb(0xD4, 0xD4, 0xD4);
 pub const TEXT_SECONDARY: Color32 = Color32::from_rgb(0xB8, 0xB8, 0xB8);
 pub const TEXT_MUTED: Color32 = Color32::from_rgb(0x8A, 0x8A, 0x8A);
-pub const TEXT_FAINT: Color32 = Color32::from_rgb(0x6E, 0x6E, 0x6E);
+pub const TEXT_FAINT: Color32 = Color32::from_rgb(0x84, 0x84, 0x84);
+/// Disabled controls and the decorative logo; WCAG sets no minimum for these.
+pub const TEXT_DIM: Color32 = Color32::from_rgb(0x6E, 0x6E, 0x6E);
 pub const ICON: Color32 = Color32::from_rgb(0x9A, 0x9A, 0x9A);
 pub const TRACK_OFF: Color32 = Color32::from_rgb(0x2E, 0x2E, 0x2E);
 pub const OK: Color32 = Color32::from_rgb(0x6E, 0x9C, 0x7A);
@@ -33,7 +35,8 @@ pub const SYN_COMMENT: Color32 = TEXT_MUTED;
 pub const SYN_MACRO: Color32 = Color32::from_rgb(0xC7, 0xA6, 0xC2);
 pub const GUTTER: Color32 = Color32::from_rgb(0x84, 0x84, 0x84);
 pub const CURRENT_LINE: Color32 = DIVIDER;
-pub const GUIDE: Color32 = BORDER;
+/// Indent guides keep the old border grey: they sit behind code, not around a control.
+pub const GUIDE: Color32 = Color32::from_rgb(0x2C, 0x2C, 0x2C);
 pub const GUIDE_ACTIVE: Color32 = Color32::from_rgb(0x55, 0x55, 0x55);
 pub const BRACKET: Color32 = Color32::from_rgb(0x4C, 0x4C, 0x4C);
 pub const POPUP: Color32 = DIVIDER;
@@ -130,7 +133,7 @@ pub fn apply_style(ctx: &egui::Context) {
         v.extreme_bg_color = SURFACE;
         v.faint_bg_color = SURFACE;
         v.override_text_color = Some(TEXT);
-        v.selection.bg_fill = Color32::from_rgb(0x3A, 0x3A, 0x3A);
+        v.selection.bg_fill = Color32::from_rgb(0x44, 0x44, 0x44);
         v.selection.stroke = Stroke::new(1.0_f32, TEXT);
         v.text_cursor.stroke = Stroke::new(1.5_f32, TEXT);
         v.window_stroke = Stroke::new(1.0_f32, BORDER);

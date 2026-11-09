@@ -18,8 +18,8 @@ use windows_sys::Win32::System::Shutdown::{ShutdownBlockReasonCreate, ShutdownBl
 use windows_sys::Win32::System::Threading::{GetCurrentProcess, TerminateProcess};
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     CallWindowProcW, SetWindowDisplayAffinity, SetWindowLongPtrW, GWLP_WNDPROC, PBT_APMSUSPEND,
-    WDA_EXCLUDEFROMCAPTURE, WDA_NONE, WM_POWERBROADCAST, WM_QUERYENDSESSION, WM_WTSSESSION_CHANGE, WNDPROC,
-    WTS_SESSION_LOCK,
+    WDA_EXCLUDEFROMCAPTURE, WDA_NONE, WM_CONTEXTMENU, WM_KEYDOWN, WM_POWERBROADCAST, WM_QUERYENDSESSION,
+    WM_WTSSESSION_CHANGE, WNDPROC, WTS_SESSION_LOCK,
 };
 
 use crate::SessionEvent;
@@ -65,6 +65,10 @@ static WAKE: OnceLock<Box<dyn Fn() + Send + Sync>> = OnceLock::new();
 /// that holds shutdown while they are saved.
 static UNSAVED: AtomicBool = AtomicBool::new(false);
 static WINDOW: AtomicIsize = AtomicIsize::new(0);
+/// The Menu key (or Shift+F10) asked for a context menu; eframe has no key
+/// for it.
+static MENU_KEY: AtomicBool = AtomicBool::new(false);
+const VK_APPS: usize = 0x5D;
 
 const LOCKED: u8 = 1;
 const SUSPENDING: u8 = 2;
@@ -109,6 +113,15 @@ unsafe extern "system" fn window_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lpar
         }
         return 0;
     }
+    // The Menu key, seen directly or as the keyboard WM_CONTEXTMENU
+    // (lparam -1) that Windows makes from it and from Shift+F10. A
+    // right-click also sends WM_CONTEXTMENU, but with the pointer position.
+    if (msg == WM_KEYDOWN && wparam == VK_APPS) || (msg == WM_CONTEXTMENU && lparam == -1) {
+        MENU_KEY.store(true, Ordering::SeqCst);
+        if let Some(wake) = WAKE.get() {
+            wake();
+        }
+    }
     let event = match (msg, wparam as u32) {
         (WM_WTSSESSION_CHANGE, WTS_SESSION_LOCK) => LOCKED,
         (WM_POWERBROADCAST, PBT_APMSUSPEND) => SUSPENDING,
@@ -126,6 +139,10 @@ unsafe extern "system" fn window_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lpar
         let original: WNDPROC = std::mem::transmute::<isize, WNDPROC>(ORIGINAL.load(Ordering::SeqCst));
         CallWindowProcW(original, hwnd, msg, wparam, lparam)
     }
+}
+
+pub fn take_menu_key() -> bool {
+    MENU_KEY.swap(false, Ordering::SeqCst)
 }
 
 pub fn take_session_event() -> Option<SessionEvent> {
