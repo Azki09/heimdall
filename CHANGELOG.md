@@ -4,6 +4,28 @@ All notable changes to Heimdall. Versions follow
 [Semantic Versioning](https://semver.org). Vaults created by any 1.x version
 keep opening in every later version (`docs/DESIGN.md` section 5.6).
 
+## [1.1.0] - 2026-11-09
+
+### Keyboard
+- A focus ring shows which control is selected while you use the keyboard
+  (hidden again as soon as you click).
+- Esc cancels every dialog; Enter on a focused button presses that button
+  instead of also confirming the dialog.
+- `Shift+F10` or the Menu key opens the right-click menu at the cursor,
+  including a secret's menu (reveal and copy without a mouse) and spelling
+  suggestions.
+- `Ctrl+Shift+E` opens the tab menu; arrow keys and Enter work in menus,
+  the recent vaults list and the Settings sidebar.
+- `F6` / `Shift+F6` move between the tab bar, the text and the status bar.
+- `Alt+F8` shows or hides the password being typed.
+- New "Keyboard" group in *Settings → Shortcuts*, and a shortcut table in
+  the README.
+
+### Contrast
+- Hint text, idle icons, the focused field border, field borders, masked
+  secrets and the text selection are lighter so they read better in low
+  light. No screen reader support, on purpose.
+
 ## [1.0.0] - 2026-11-08
 
 First stable release.

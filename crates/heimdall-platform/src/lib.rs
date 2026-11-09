@@ -109,6 +109,14 @@ pub fn take_session_event() -> Option<SessionEvent> {
     None
 }
 
+/// Whether the Menu key (or Shift+F10) was pressed since the last call.
+pub fn take_menu_key() -> bool {
+    #[cfg(windows)]
+    return harden::take_menu_key();
+    #[cfg(not(windows))]
+    false
+}
+
 /// Whether the app has unsaved changes right now. While it does, Windows
 /// shutdown and sign-out wait for a save ([`SessionEvent::Ending`]).
 pub fn set_unsaved(unsaved: bool) {

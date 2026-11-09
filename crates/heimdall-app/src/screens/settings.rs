@@ -946,7 +946,7 @@ fn shortcuts(ui: &mut Ui) {
     ui.add_space(6.0);
     /// What a row does, and its key combinations.
     type Row = (&'static str, &'static [&'static [&'static str]]);
-    let groups: [(&str, &[Row]); 5] = [
+    let groups: [(&str, &[Row]); 6] = [
         (
             "Tabs",
             &[
@@ -961,6 +961,7 @@ fn shortcuts(ui: &mut Ui) {
                     "Go to tab 1–8 / the last tab",
                     &[&["Ctrl", "1…8"], &["Ctrl", "9"]],
                 ),
+                ("All tabs, export and import", &[&["Ctrl", "Shift", "E"]]),
             ],
         ),
         (
@@ -995,6 +996,21 @@ fn shortcuts(ui: &mut Ui) {
                 ("Save all notes", &[&["Ctrl", "S"]]),
                 ("Lock now", &[&["Ctrl", "L"]]),
                 ("Settings", &[&["Ctrl", ","]]),
+            ],
+        ),
+        (
+            "Keyboard",
+            &[
+                (
+                    "Move between tab bar, text and status bar",
+                    &[&["F6"], &["Shift", "F6"]],
+                ),
+                ("Right-click menu at the cursor", &[&["Shift", "F10"], &["Menu"]]),
+                ("Show or hide a password being typed", &[&["Alt", "F8"]]),
+                ("Next / previous control", &[&["Tab"], &["Shift", "Tab"]]),
+                ("Press the selected control", &[&["Space"], &["Enter"]]),
+                ("Move in menus and lists", &[&["↑"], &["↓"]]),
+                ("Close a menu or cancel a dialog", &[&["Esc"]]),
             ],
         ),
     ];

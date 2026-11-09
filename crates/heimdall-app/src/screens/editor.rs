@@ -72,6 +72,10 @@ pub struct EditorState {
     reveal: Option<(usize, usize)>,
     /// The list of all tabs, open under the `⌄` button drawn here.
     tab_menu: Option<Rect>,
+    /// Where the `⌄` button was last drawn, for Ctrl+Shift+E.
+    tab_menu_anchor: Option<Rect>,
+    /// The controls F6 moves between (DESIGN §10.10), from the last frame.
+    zones: Zones,
     /// The right-click menu of a tab, where it opened, and whether this is
     /// the frame it opened in (that click must not close it again).
     tab_context: Option<(Uuid, Pos2, bool)>,
@@ -95,6 +99,15 @@ pub struct EditorState {
     paste: Option<PendingPaste>,
     /// The message after masking (with Undo), bottom right.
     toast: Option<Toast>,
+}
+
+/// The tab bar's and status bar's controls, so F6 can move the focus
+/// between the tab bar, the text and the status bar.
+#[derive(Default)]
+struct Zones {
+    tabs: Vec<egui::Id>,
+    active_tab: Option<egui::Id>,
+    status: Option<egui::Id>,
 }
 
 impl Drop for EditorState {
@@ -557,6 +570,36 @@ fn take_shortcut(i: &mut egui::InputState, mods: Modifiers, key: Key, allow_repe
 
 /// A one-shot shortcut: holding the keys doesn't repeat it. Holding Ctrl+T
 /// used to open a tab per key repeat, and Ctrl+W to close one per repeat.
+/// F6 / Shift+F6: tab bar → text → status bar → tab bar (DESIGN §10.10).
+/// Inside the text Tab inserts spaces, so this is how the focus leaves it.
+fn move_zone(ctx: &egui::Context, st: &mut EditorState, step: i32) {
+    const TABS: usize = 0;
+    const TEXT: usize = 1;
+    const STATUS: usize = 2;
+    let focused = ctx.memory(|m| m.focused());
+    let current = match focused {
+        Some(f) if st.zones.tabs.contains(&f) => TABS,
+        Some(f) if Some(f) == st.zones.status => STATUS,
+        _ => TEXT,
+    };
+    let zones: Vec<usize> = [TABS, TEXT, STATUS]
+        .into_iter()
+        .filter(|z| *z != STATUS || st.zones.status.is_some())
+        .collect();
+    let at = zones.iter().position(|z| *z == current).unwrap_or(0) as i32;
+    let next = zones[(at + step).rem_euclid(zones.len() as i32) as usize];
+    crate::focus::set_keyboard_mode(ctx, true);
+    let target = match next {
+        TABS => st.zones.active_tab.or_else(|| st.zones.tabs.first().copied()),
+        STATUS => st.zones.status,
+        _ => None,
+    };
+    match target {
+        Some(id) => ctx.memory_mut(|m| m.request_focus(id)),
+        None => st.focus_editor = true,
+    }
+}
+
 fn press(i: &mut egui::InputState, mods: Modifiers, key: Key) -> bool {
     take_shortcut(i, mods, key, false)
 }
@@ -576,9 +619,20 @@ fn shortcuts(ctx: &egui::Context, s: &mut Session, st: &mut EditorState) -> Opti
     let mut open_find = false;
     let mut open_find_all = false;
     let mut find_step = 0;
+    let mut open_tab_menu = false;
+    let mut zone_step = 0;
 
     let global_wrap = content.editor.word_wrap;
     ctx.input_mut(|i| {
+        if press(i, cmd_shift, Key::E) {
+            open_tab_menu = true;
+        }
+        // Shift+F6 first: press() ignores an extra Shift.
+        if press(i, Modifiers::SHIFT, Key::F6) {
+            zone_step = -1;
+        } else if press(i, Modifiers::NONE, Key::F6) {
+            zone_step = 1;
+        }
         // Shift variants first: press() ignores an extra Shift.
         if press(i, cmd_shift, Key::F) {
             open_find_all = true;
@@ -707,6 +761,15 @@ fn shortcuts(ctx: &egui::Context, s: &mut Session, st: &mut EditorState) -> Opti
     if changed {
         s.touch(None);
     }
+    if open_tab_menu {
+        if let Some(anchor) = st.tab_menu_anchor {
+            st.tab_menu = Some(anchor);
+            crate::focus::seed_menu(ctx);
+        }
+    }
+    if zone_step != 0 {
+        move_zone(ctx, st, zone_step);
+    }
     if open_find {
         let (selected, origin) = selection(ctx, s);
         match &mut st.find {
@@ -816,6 +879,8 @@ fn tabs(ui: &mut Ui, s: &mut Session, st: &mut EditorState, avail: f32) {
     let mut activate = None;
     let mut close = None;
     let mut commit_rename = false;
+    st.zones.tabs.clear();
+    st.zones.active_tab = None;
 
     for note in &s.vault.content.notes {
         let id = note.id;
@@ -874,6 +939,10 @@ fn tabs(ui: &mut Ui, s: &mut Session, st: &mut EditorState, avail: f32) {
         job.wrap = egui::text::TextWrapping::truncate_at_width(text_max);
         let galley = ui.painter().layout_job(job);
         let (outer, resp) = ui.allocate_exact_size(vec2(tab_w, chrome::TITLE_BAR_H), Sense::click_and_drag());
+        st.zones.tabs.push(resp.id);
+        if is_active {
+            st.zones.active_tab = Some(resp.id);
+        }
         let tab = Rect::from_min_max(pos2(outer.left(), outer.bottom() - TAB_H), outer.max);
         let hovered = resp.hovered();
         let painter = ui.painter();
@@ -953,6 +1022,7 @@ fn tabs(ui: &mut Ui, s: &mut Session, st: &mut EditorState, avail: f32) {
         12.0,
         if plus_resp.hovered() { TEXT } else { TEXT_MUTED },
     );
+    st.zones.tabs.push(plus_resp.id);
     let plus_resp = plus_resp.on_hover_text("New tab (Ctrl+T)");
 
     let content = &mut s.vault.content;
@@ -1508,7 +1578,22 @@ fn text_area(ui: &mut Ui, s: &mut Session, st: &mut EditorState) {
     // Right-click: a secret's menu; else a misspelled word's suggestions;
     // else the general menu (Cut, Copy, Paste, Select all, and Mark as
     // secret / Reveal all when they apply).
-    if output.response.secondary_clicked() {
+    // Shift+F10 or the Menu key opens the same menus at the caret
+    // (DESIGN §10.10); a secret next to the caret counts as under it.
+    let mut key_menu = None;
+    if focused && crate::focus::context_menu_key(&ctx) {
+        if let Some(range) = output.cursor_range {
+            let c = range.primary.ccursor.index;
+            let row = output
+                .galley
+                .pos_from_cursor(&range.primary)
+                .translate(output.galley_pos.to_vec2());
+            let secret = items.iter().position(|it| it.chars.0 <= c && c <= it.chars.1);
+            key_menu = Some((pos2(row.min.x, row.min.y + glyph_h), c, secret));
+            crate::focus::seed_menu(&ctx);
+        }
+    }
+    if output.response.secondary_clicked() || key_menu.is_some() {
         st.spell_menu = None;
         st.secret_menu = None;
         // The click ends on release, a frame after `kept_selection` put the
@@ -1517,14 +1602,20 @@ fn text_area(ui: &mut Ui, s: &mut Session, st: &mut EditorState) {
             || egui::TextEdit::load_state(&ctx, id)
                 .and_then(|s| s.cursor.char_range())
                 .is_some_and(|r| r.primary != r.secondary);
-        if let Some(pos) = ctx.input(|i| i.pointer.interact_pos()) {
-            let at = output
-                .galley
-                .cursor_from_pos(pos - output.galley_pos)
-                .ccursor
-                .index;
+        let point = match key_menu {
+            Some((pos, at, secret)) => Some((pos, at, secret)),
+            None => ctx.input(|i| i.pointer.interact_pos()).map(|pos| {
+                let at = output
+                    .galley
+                    .cursor_from_pos(pos - output.galley_pos)
+                    .ccursor
+                    .index;
+                (pos, at, screen.at(&items, pos))
+            }),
+        };
+        if let Some((pos, at, secret)) = point {
             let byte = char_to_byte(&note.body, at);
-            if let Some(i) = screen.at(&items, pos) {
+            if let Some(i) = secret {
                 st.secret_menu = Some(SecretMenu {
                     pos,
                     note: active,
@@ -2212,6 +2303,7 @@ fn line_col(text: &str, char_idx: usize) -> (usize, usize) {
 fn status_bar(ctx: &egui::Context, s: &Session, st: &mut EditorState, last_input: Instant) {
     let show = s.vault.content.editor.status_bar;
     let notice = s.current_notice();
+    st.zones.status = None;
     if !show && s.save_error.is_none() && notice.is_none() {
         return;
     }
@@ -2269,6 +2361,7 @@ fn status_bar(ctx: &egui::Context, s: &Session, st: &mut EditorState, last_input
                     if let Some(note) = note {
                         let resp = language_button(ui, note, st.picker.is_some());
                         st.language_button = Some(resp.rect);
+                        st.zones.status = Some(resp.id);
                         if resp.clicked() {
                             st.picker = match st.picker {
                                 Some(_) => None,
@@ -2622,7 +2715,7 @@ fn menu_row_enabled(
         Align2::LEFT_CENTER,
         text,
         crate::theme::ui(13.0),
-        TEXT_FAINT,
+        TEXT_DIM,
     );
     if let Some(hint) = hint {
         painter.text(
@@ -2630,7 +2723,7 @@ fn menu_row_enabled(
             Align2::RIGHT_CENTER,
             hint,
             crate::theme::ui(12.0),
-            TEXT_FAINT,
+            TEXT_DIM,
         );
     }
     resp
@@ -2638,6 +2731,7 @@ fn menu_row_enabled(
 
 fn menu_row(ui: &mut Ui, width: f32, text: &str, hint: Option<&str>, selected: bool) -> egui::Response {
     let (outer, resp) = ui.allocate_exact_size(vec2(width, 34.0), Sense::click());
+    crate::focus::claim_seed(&resp);
     let rect = outer.shrink2(vec2(6.0, 0.0));
     let painter = ui.painter();
     if selected {
@@ -2748,6 +2842,8 @@ fn tab_menu_button(ui: &mut Ui, st: &mut EditorState, x: f32) {
     let bar = ui.max_rect();
     let rect = Rect::from_center_size(pos2(x + 16.0, bar.bottom() - TAB_H / 2.0), vec2(28.0, 28.0));
     let resp = ui.interact(rect, egui::Id::new("tab_menu_button"), Sense::click());
+    st.zones.tabs.push(resp.id);
+    st.tab_menu_anchor = Some(rect);
     let open = st.tab_menu.is_some();
     let painter = ui.painter();
     if open {
@@ -2760,7 +2856,12 @@ fn tab_menu_button(ui: &mut Ui, st: &mut EditorState, x: f32) {
     if resp.hovered() {
         ui.ctx().set_cursor_icon(CursorIcon::PointingHand);
     }
-    let clicked = resp.on_hover_text("All tabs, export and import").clicked();
+    let clicked = resp
+        .on_hover_text("All tabs, export and import (Ctrl+Shift+E)")
+        .clicked();
+    if clicked && !open {
+        crate::focus::seed_menu(ui.ctx());
+    }
     st.tab_menu = match (clicked, open) {
         (true, true) | (false, false) => None,
         _ => Some(rect),
@@ -2895,6 +2996,7 @@ fn tab_context_menu(ctx: &egui::Context, s: &mut Session, st: &mut EditorState) 
 
 fn tab_row(ui: &mut Ui, title: &str, code_mode: bool, dirty: bool, selected: bool) -> egui::Response {
     let (outer, resp) = ui.allocate_exact_size(vec2(288.0, 34.0), Sense::click());
+    crate::focus::claim_seed(&resp);
     let rect = outer.shrink2(vec2(6.0, 0.0));
     let painter = ui.painter();
     let hot = selected || resp.hovered();

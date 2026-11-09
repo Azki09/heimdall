@@ -386,6 +386,7 @@ impl eframe::App for HeimdallApp {
     fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
         chrome::handle_resize(ctx);
         self.attach_window(ctx, frame);
+        crate::focus::begin_frame(ctx);
 
         if ctx.input(|i| !i.events.is_empty() || i.pointer.is_moving()) {
             self.last_input = Instant::now();
@@ -433,6 +434,7 @@ impl eframe::App for HeimdallApp {
         self.handle_copies(ctx);
         self.apply_capture_exclusion();
         let clip_due = self.clipboard.tick();
+        crate::focus::paint_ring(ctx);
         chrome::paint_border(ctx);
 
         // Shutdown and sign-out wait for a save while there is something

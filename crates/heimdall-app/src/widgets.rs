@@ -42,7 +42,7 @@ pub fn logo(ui: &mut Ui, font_size: f32) {
             Align2::LEFT_TOP,
             line,
             font.clone(),
-            TEXT_FAINT,
+            TEXT_DIM,
         );
     }
 }
@@ -84,16 +84,16 @@ pub fn button(ui: &mut Ui, kind: ButtonKind, text: &str, enabled: bool, size: Ve
             Stroke::NONE,
             BG,
         ),
-        (ButtonKind::Primary | ButtonKind::Danger, false) => (TRACK_OFF, Stroke::NONE, TEXT_FAINT),
+        (ButtonKind::Primary | ButtonKind::Danger, false) => (TRACK_OFF, Stroke::NONE, TEXT_DIM),
         (ButtonKind::Secondary, _) => (
             if hovered { NAV_ACTIVE } else { Color32::TRANSPARENT },
             Stroke::new(1.0_f32, BORDER),
-            if enabled { TEXT_SECONDARY } else { TEXT_FAINT },
+            if enabled { TEXT_SECONDARY } else { TEXT_DIM },
         ),
         (ButtonKind::DangerOutline, _) => (
             if hovered { NAV_ACTIVE } else { Color32::TRANSPARENT },
             Stroke::new(1.0_f32, BORDER),
-            if enabled { DANGER } else { TEXT_FAINT },
+            if enabled { DANGER } else { TEXT_DIM },
         ),
         (ButtonKind::Quiet, _) => (
             Color32::TRANSPARENT,
@@ -103,7 +103,7 @@ pub fn button(ui: &mut Ui, kind: ButtonKind, text: &str, enabled: bool, size: Ve
             } else if enabled {
                 TEXT_MUTED
             } else {
-                TEXT_FAINT
+                TEXT_DIM
             },
         ),
     };
@@ -197,7 +197,7 @@ pub fn text_field(
     id: egui::Id,
     text: &mut String,
     width: f32,
-    password: Option<&mut bool>,
+    mut password: Option<&mut bool>,
     hint: &str,
 ) -> Response {
     let height = 42.0;
@@ -215,6 +215,15 @@ pub fn text_field(
         pos2(rect.left() + 12.0, rect.top()),
         pos2(rect.right() - 6.0 - eye_w, rect.bottom()),
     );
+    // Alt+F8 shows or hides the password, as on the Windows sign-in
+    // screen; the eye itself stays mouse-only (DESIGN §10.10).
+    if focused {
+        if let Some(reveal) = password.as_deref_mut() {
+            if crate::focus::reveal_key(ui.ctx()) {
+                *reveal = !*reveal;
+            }
+        }
+    }
     let masked = password.as_ref().is_some_and(|r| !**r);
     let mut child = ui.new_child(
         egui::UiBuilder::new()
@@ -242,13 +251,17 @@ pub fn text_field(
             if eye.hovered() {
                 TEXT
             } else {
-                Color32::from_gray(0x7A)
+                Color32::from_gray(0x82)
             },
         );
         if eye.clicked() {
             *reveal = !*reveal;
         }
-        eye.on_hover_text(if *reveal { "Hide password" } else { "Show password" });
+        eye.on_hover_text(if *reveal {
+            "Hide password (Alt+F8)"
+        } else {
+            "Show password (Alt+F8)"
+        });
     }
     response
 }

@@ -289,6 +289,11 @@ impl Wizard {
                 vec2(0.0, 40.0),
             )
             .clicked()
+                // Escape goes back too, except on the recovery words and the
+                // check after them, so they can't be skipped by accident.
+                || (back_enabled
+                    && !matches!(self.step, Step::Recovery | Step::Confirm)
+                    && crate::focus::escape(ui.ctx()))
             {
                 action = self.back();
             }
@@ -296,8 +301,7 @@ impl Wizard {
                 let ready = !busy && self.can_continue();
                 let label = if busy { "Generating keys…" } else { next_label };
                 let next = widgets::button(ui, ButtonKind::Primary, label, ready, vec2(0.0, 40.0)).clicked();
-                let enter =
-                    ready && ui.input(|i| i.key_pressed(egui::Key::Enter)) && self.step != Step::Recovery;
+                let enter = ready && crate::focus::enter_submits(ui) && self.step != Step::Recovery;
                 if next || enter {
                     action = self.next(ui.ctx());
                 }
@@ -565,7 +569,7 @@ impl Wizard {
             let (tc, dc) = if enabled {
                 (TEXT, TEXT_MUTED)
             } else {
-                (TEXT_FAINT, TEXT_FAINT)
+                (TEXT_DIM, TEXT_DIM)
             };
             let desc = ui
                 .painter()
@@ -797,7 +801,7 @@ pub fn step_list(ui: &mut Ui, labels: &[&str], current: usize) {
 }
 
 const STEP_TODO: egui::Color32 = egui::Color32::from_rgb(0x3A, 0x3A, 0x3A);
-const STEP_TODO_TEXT: egui::Color32 = egui::Color32::from_rgb(0x7A, 0x7A, 0x7A);
+const STEP_TODO_TEXT: egui::Color32 = egui::Color32::from_rgb(0x82, 0x82, 0x82);
 
 /// `C:\Users\me\Documents\x.heim` → `Documents\x.heim`.
 fn display_path(p: &Path) -> String {

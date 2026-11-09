@@ -4,6 +4,7 @@
 mod app;
 mod chrome;
 mod code;
+mod focus;
 mod plain;
 mod screens;
 mod search;
