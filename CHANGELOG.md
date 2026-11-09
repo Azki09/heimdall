@@ -4,7 +4,7 @@ All notable changes to Heimdall. Versions follow
 [Semantic Versioning](https://semver.org). Vaults created by any 1.x version
 keep opening in every later version (`docs/DESIGN.md` section 5.6).
 
-## [Unreleased]
+## [1.1.0] - 2026-11-09
 
 ### Keyboard
 - A focus ring shows which control is selected while you use the keyboard
