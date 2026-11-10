@@ -4,7 +4,32 @@ All notable changes to Heimdall. Versions follow
 [Semantic Versioning](https://semver.org). Vaults created by any 1.x version
 keep opening in every later version (`docs/DESIGN.md` section 5.6).
 
-## [Unreleased]
+## [1.2.0] - 2026-11-09
+
+### Install on Linux
+Download, verify and run the AppImage:
+
+```sh
+cd ~/Downloads
+base=https://github.com/Azki09/heimdall/releases/download/v1.2.0
+curl -LO "$base/Heimdall-1.2.0-x86_64.AppImage"
+curl -LO "$base/SHA256SUMS.txt"
+sha256sum -c --ignore-missing SHA256SUMS.txt
+gh attestation verify Heimdall-1.2.0-x86_64.AppImage -R Azki09/heimdall   # optional, needs the GitHub CLI
+chmod +x Heimdall-1.2.0-x86_64.AppImage
+./Heimdall-1.2.0-x86_64.AppImage
+```
+
+If it doesn't start (AppImages need FUSE 2: `sudo apt install libfuse2` on
+Ubuntu 22.04, `libfuse2t64` on 24.04), use the `.tar.gz`:
+
+```sh
+curl -LO "$base/heimdall-1.2.0-linux-x86_64.tar.gz"
+sha256sum -c --ignore-missing SHA256SUMS.txt
+tar xzf heimdall-1.2.0-linux-x86_64.tar.gz
+./heimdall-1.2.0-linux-x86_64/heimdall
+```
+
 
 ### Linux
 - Heimdall now runs on Linux (x86_64, glibc 2.35 or newer), as an AppImage
@@ -20,6 +45,13 @@ keep opening in every later version (`docs/DESIGN.md` section 5.6).
 ### Security
 - Screen reader support (accesskit) is now compiled out on every system.
   It exposed the text of the notes to any program in the session.
+
+### Fixed
+- The keyboard focus ring from 1.1.0 never showed, and Enter confirmed a
+  dialog even while one of its buttons was focused.
+- The title bar, the window buttons and the tab close buttons are no
+  longer Tab stops.
+- A read-only vault file is never replaced when saving.
 
 ## [1.1.0] - 2026-11-09
 
@@ -109,5 +141,6 @@ First stable release.
 - Releases built by GitHub Actions with a statically linked C runtime,
   published with SHA-256 checksums and a build provenance attestation.
 
+[1.2.0]: https://github.com/Azki09/heimdall/releases/tag/v1.2.0
 [1.1.0]: https://github.com/Azki09/heimdall/releases/tag/v1.1.0
 [1.0.0]: https://github.com/Azki09/heimdall/releases/tag/v1.0.0
