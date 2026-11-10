@@ -972,7 +972,8 @@ fn tabs(ui: &mut Ui, s: &mut Session, st: &mut EditorState, avail: f32) {
             widgets::dot(painter, pos2(text_pos.x + text_w + 10.0, tab.center().y), ICON);
         }
         let close_rect = Rect::from_center_size(pos2(tab.right() - 16.0, tab.center().y), vec2(20.0, 20.0));
-        let close_resp = ui.interact(close_rect, egui::Id::new(("tab_close", id)), Sense::click());
+        // Not a Tab stop: Ctrl+W closes the tab from the keyboard.
+        let close_resp = ui.interact(close_rect, egui::Id::new(("tab_close", id)), Sense::CLICK);
         if is_active || hovered || close_resp.hovered() {
             if close_resp.hovered() {
                 ui.painter()
