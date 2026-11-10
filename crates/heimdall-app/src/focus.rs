@@ -50,6 +50,9 @@ pub fn begin_frame(ctx: &egui::Context) {
         set_keyboard_mode(ctx, false);
     } else if nav {
         set_keyboard_mode(ctx, true);
+        // Focus moves at the start of the next frame: draw that frame now,
+        // not at the next timer tick, so the ring follows the key at once.
+        ctx.request_repaint();
     }
 }
 
@@ -58,13 +61,13 @@ pub fn paint_ring(ctx: &egui::Context) {
     if !keyboard_mode(ctx) {
         return;
     }
-    // A text field shows focus with its own border and caret.
-    if ctx.wants_keyboard_input() {
-        return;
-    }
     let Some(id) = ctx.memory(|m| m.focused()) else {
         return;
     };
+    // A text field shows focus with its own border and caret.
+    if is_text_field(ctx, id) {
+        return;
+    }
     let Some(resp) = ctx.read_response(id) else {
         return;
     };
@@ -92,6 +95,7 @@ pub fn seed_menu(ctx: &egui::Context) {
     if keyboard_mode(ctx) || ctx.input(|i| !i.keys_down.is_empty()) {
         set_keyboard_mode(ctx, true);
         ctx.data_mut(|d| d.insert_temp(seed_id(), true));
+        ctx.request_repaint();
     }
 }
 
@@ -105,11 +109,20 @@ pub fn claim_seed(resp: &egui::Response) {
     }
 }
 
+/// Whether `id` is a text field. egui's `wants_keyboard_input` can't tell:
+/// in 0.31 it is true whenever anything has the focus, buttons included.
+/// A text field keeps its state (cursor, scroll) under its own id.
+fn is_text_field(ctx: &egui::Context, id: Id) -> bool {
+    egui::TextEdit::load_state(ctx, id).is_some()
+}
+
 /// Enter pressed to submit a dialog. Not when Enter is meant for a focused
 /// button (Cancel, Back...): egui presses that button instead.
 pub fn enter_submits(ui: &egui::Ui) -> bool {
     let ctx = ui.ctx();
-    let on_button = ctx.memory(|m| m.focused()).is_some() && !ctx.wants_keyboard_input();
+    let on_button = ctx
+        .memory(|m| m.focused())
+        .is_some_and(|id| !is_text_field(ctx, id));
     !on_button && ui.input(|i| i.key_pressed(Key::Enter))
 }
 
