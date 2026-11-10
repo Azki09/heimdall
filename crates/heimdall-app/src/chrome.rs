@@ -22,7 +22,8 @@ pub fn title_bar(ctx: &egui::Context, content: impl FnOnce(&mut Ui)) {
             let bar = ui.max_rect();
 
             // Background drag area first, so widgets on top take priority.
-            let drag = ui.interact(bar, egui::Id::new("title_drag"), Sense::click_and_drag());
+            // Not a Tab stop (no FOCUSABLE): the window is moved with the mouse.
+            let drag = ui.interact(bar, egui::Id::new("title_drag"), Sense::CLICK | Sense::DRAG);
             if drag.drag_started_by(egui::PointerButton::Primary) {
                 ctx.send_viewport_cmd(ViewportCommand::StartDrag);
             }
@@ -70,7 +71,8 @@ fn window_buttons(ui: &mut Ui, ctx: &egui::Context, rect: Rect) {
             pos2(rect.left() + i as f32 * BUTTON_W, rect.top()),
             vec2(BUTTON_W, TITLE_BAR_H),
         );
-        let resp = ui.interact(r, egui::Id::new(("win_btn", kind)), Sense::click());
+        // Not a Tab stop: minimize, maximize and close have system keys.
+        let resp = ui.interact(r, egui::Id::new(("win_btn", kind)), Sense::CLICK);
         let painter = ui.painter();
         if resp.hovered() {
             let fill = if kind == 2 {
