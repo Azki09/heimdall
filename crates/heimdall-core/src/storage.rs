@@ -41,7 +41,14 @@ pub fn backup_path(path: &Path) -> PathBuf {
 /// Writes `bytes` to `path` so that `path` always holds either the old or
 /// the new complete version: write to a temporary file next to it, flush +
 /// fsync, rename over.
+///
+/// A vault marked read-only is never replaced. Windows refuses the rename
+/// by itself; on Linux a rename only needs the folder to be writable, so
+/// the flag is checked here, before the `.bak` is touched.
 pub fn save_vault(path: &Path, bytes: &[u8], kind: SaveKind) -> Result<()> {
+    if fs::metadata(path).is_ok_and(|m| m.permissions().readonly()) {
+        return Err(io::Error::new(io::ErrorKind::PermissionDenied, "the vault file is read-only").into());
+    }
     let bak = backup_path(path);
     match kind {
         SaveKind::Normal => {
