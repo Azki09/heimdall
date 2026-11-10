@@ -6,6 +6,33 @@ keep opening in every later version (`docs/DESIGN.md` section 5.6).
 
 ## [1.2.0] - 2026-11-09
 
+### Which file do I download?
+
+| Your system | File |
+|---|---|
+| Windows 10 / 11 (64-bit) | `heimdall.exe` |
+| Linux x86_64 (Ubuntu 22.04, Debian 12, Fedora 36 or newer) | `Heimdall-1.2.0-x86_64.AppImage` (or the `.tar.gz` if AppImages don't run) |
+
+`SHA256SUMS.txt` holds the hash of every file, to check your download.
+
+### Install on Windows
+In PowerShell: download, verify and run `heimdall.exe` (no installer):
+
+```powershell
+cd $HOME\Downloads
+$base = "https://github.com/Azki09/heimdall/releases/download/v1.2.0"
+Invoke-WebRequest "$base/heimdall.exe" -OutFile heimdall.exe
+Invoke-WebRequest "$base/SHA256SUMS.txt" -OutFile SHA256SUMS.txt
+$expected = (Select-String 'heimdall\.exe$' SHA256SUMS.txt).Line.Split(' ')[0]
+if ((Get-FileHash heimdall.exe).Hash -eq $expected) { "OK" } else { "MISMATCH: do not run it" }
+gh attestation verify heimdall.exe -R Azki09/heimdall   # optional, needs the GitHub CLI
+.\heimdall.exe
+```
+
+The executable is not signed yet, so the first time Windows SmartScreen
+may show "Windows protected your PC". If the hash matched, choose
+**More info → Run anyway**.
+
 ### Install on Linux
 Download, verify and run the AppImage:
 
