@@ -257,6 +257,8 @@ Run the tests with `cargo test --workspace`. Fuzzing targets are in
 Please report vulnerabilities privately, as described in
 [`SECURITY.md`](SECURITY.md). Do not open a public issue.
 
+May the Omnissiah bless this repo.
+
 ## Code signing policy
 
 Free code signing provided by [SignPath.io](https://signpath.io), certificate
