@@ -21,6 +21,10 @@ fn main() -> eframe::Result {
     let options = eframe::NativeOptions {
         viewport: eframe::egui::ViewportBuilder::default()
             .with_title("Heimdall")
+            .with_icon(
+                eframe::icon_data::from_png_bytes(include_bytes!("../assets/icon/heimdall-256.png"))
+                    .unwrap_or_default(),
+            )
             // Linux desktops match the window to `heimdall.desktop` by it.
             .with_app_id("heimdall")
             .with_inner_size([1100.0, 680.0])

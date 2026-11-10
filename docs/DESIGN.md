@@ -741,7 +741,7 @@ heimdall/
 │   ├── DESIGN.md           (este documento)
 │   └── FORMAT.md           Especificación detallada del formato (después)
 ├── fuzz/                   cargo-fuzz sobre el parser del .heim
-├── packaging/linux/        heimdall.desktop y heimdall.svg (AppImage y .tar.gz)
+├── packaging/linux/        heimdall.desktop y heimdall.png (AppImage y .tar.gz)
 ├── SECURITY.md             Modelo de amenazas público + cómo reportar vulnerabilidades
 └── LICENSE
 ```

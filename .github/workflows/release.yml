@@ -105,7 +105,7 @@ jobs:
           # .tar.gz: the executable, its desktop entry and icon, the license.
           pkg="heimdall-$version-linux-x86_64"
           mkdir "$pkg"
-          cp target/release/heimdall packaging/linux/heimdall.desktop packaging/linux/heimdall.svg LICENSE README.md "$pkg/"
+          cp target/release/heimdall packaging/linux/heimdall.desktop packaging/linux/heimdall.png LICENSE README.md "$pkg/"
           tar --owner=0 --group=0 -czf "dist/$pkg.tar.gz" "$pkg"
 
           # AppImage: one file that runs on its own.
@@ -116,7 +116,7 @@ jobs:
           chmod +x appimagetool
           mkdir -p AppDir/usr/bin
           cp target/release/heimdall AppDir/usr/bin/
-          cp packaging/linux/heimdall.desktop packaging/linux/heimdall.svg AppDir/
+          cp packaging/linux/heimdall.desktop packaging/linux/heimdall.png AppDir/
           ln -s usr/bin/heimdall AppDir/AppRun
           ARCH=x86_64 ./appimagetool --appimage-extract-and-run --no-appstream \
             --runtime-file runtime AppDir "dist/Heimdall-$version-x86_64.AppImage"
