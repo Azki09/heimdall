@@ -235,12 +235,24 @@ mod tests {
 
     #[test]
     fn labels() {
+        let root = if cfg!(windows) {
+            r"E:\"
+        } else {
+            "/media/ana/KINGSTON"
+        };
         let d = Drive {
-            root: PathBuf::from(r"E:\"),
+            root: PathBuf::from(root),
             name: "KINGSTON".into(),
             size: 32_017_047_552,
         };
-        assert_eq!(d.letter(), "E:");
+        assert_eq!(
+            d.letter(),
+            if cfg!(windows) {
+                "E:"
+            } else {
+                "/media/ana/KINGSTON"
+            }
+        );
         assert_eq!(d.size_label(), "32 GB");
         assert_eq!(Drive { size: 0, ..d.clone() }.size_label(), "");
         assert_eq!(
