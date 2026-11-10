@@ -1,6 +1,6 @@
 [package]
 name = "heimdall-platform"
-description = "Heimdall OS-specific code: USB drives, printing and process hardening. Windows first."
+description = "Heimdall OS-specific code: USB drives, printing, session events and process hardening (Windows and Linux)."
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -27,6 +27,10 @@ windows-sys = { version = "0.61", features = [
     "Win32_UI_Input_KeyboardAndMouse",
     "Win32_UI_WindowsAndMessaging",
 ] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+libc = "0.2"
+zbus = { version = "5", default-features = false, features = ["async-io", "blocking-api"] }
 
 # The only crate allowed to call the OS through FFI. `unsafe` is denied
 # (not forbidden) so the Windows module can opt in, with a SAFETY note on

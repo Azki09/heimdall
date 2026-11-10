@@ -41,8 +41,9 @@ fn password_gate() -> PasswordCheck {
     )
 }
 
-/// Whether `a` and `b` name the same file. Windows paths ignore case; a
-/// file that doesn't exist yet is compared through its folder.
+/// Whether `a` and `b` name the same file. Windows paths ignore case (Linux
+/// paths don't); a file that doesn't exist yet is compared through its
+/// folder.
 pub fn same_file(a: &Path, b: &Path) -> bool {
     let canon = |p: &Path| {
         std::fs::canonicalize(p).unwrap_or_else(|_| {
@@ -55,7 +56,12 @@ pub fn same_file(a: &Path, b: &Path) -> bool {
             }
         })
     };
-    canon(a).to_string_lossy().to_lowercase() == canon(b).to_string_lossy().to_lowercase()
+    let (a, b) = (canon(a), canon(b));
+    if cfg!(windows) {
+        a.to_string_lossy().to_lowercase() == b.to_string_lossy().to_lowercase()
+    } else {
+        a == b
+    }
 }
 
 /// The open vault, its `.bak` or its `.tmp`: never the target of a copy.

@@ -2,9 +2,8 @@
 # Run locally with `cargo deny check`.
 
 [graph]
-# Heimdall only ships for Windows so far: check what that build pulls in.
-# (The GUI stack's Linux-only crates, such as zbus, are not shipped.)
-targets = ["x86_64-pc-windows-msvc"]
+# Heimdall ships for Windows and Linux: check what both builds pull in.
+targets = ["x86_64-pc-windows-msvc", "x86_64-unknown-linux-gnu"]
 all-features = true
 
 [advisories]
@@ -13,12 +12,17 @@ all-features = true
 version = 2
 yanked = "deny"
 ignore = [
-    # Both come from egui 0.31 (eframe -> accesskit_windows, epaint ->
-    # ab_glyph). "Unmaintained" is not a known vulnerability: `paste` is a
-    # compile-time macro and `ttf-parser` only reads the fonts bundled in the
-    # executable, never a file from outside. Drop these when egui moves on.
-    { id = "RUSTSEC-2024-0436", reason = "paste: build-time macro via egui/accesskit" },
+    # From egui 0.31 (epaint -> ab_glyph). "Unmaintained" is not a known
+    # vulnerability: `ttf-parser` only reads the fonts bundled in the
+    # executable, never a file from outside. Drop it when egui moves on.
     { id = "RUSTSEC-2026-0192", reason = "ttf-parser: only parses bundled fonts, via egui" },
+    # Linux only. zbus 5's helper crates were folded into zbus 6, so they
+    # are "unmaintained" with no vulnerability. zbus 5 comes with rfd's file
+    # dialog (xdg portal) and Heimdall's logind listener uses the same copy.
+    # Drop these when rfd moves to zbus 6.
+    { id = "RUSTSEC-2026-0370", reason = "zvariant: merged into zbus 6, no vulnerability; via rfd" },
+    { id = "RUSTSEC-2026-0371", reason = "zbus_names: merged into zbus 6, no vulnerability; via rfd" },
+    { id = "RUSTSEC-2026-0372", reason = "zvariant_derive: merged into zbus 6, no vulnerability; via rfd" },
 ]
 
 [licenses]

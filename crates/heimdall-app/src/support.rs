@@ -69,7 +69,7 @@ pub fn save_error_message(e: &Error) -> String {
     let text = match (io.raw_os_error(), io.kind()) {
         (Some(32 | 33), _) => "Another program is using the vault file (OneDrive, an antivirus or a backup tool). Your changes are still here; Heimdall will try again.",
         (Some(112 | 39), _) | (_, ErrorKind::StorageFull) => "The disk is full. Free some space; your changes are still here and the file on disk is unchanged.",
-        (Some(5), _) | (_, ErrorKind::PermissionDenied) => "Windows won't let Heimdall write the vault file. It, or its folder, may be read-only.",
+        (Some(5), _) | (_, ErrorKind::PermissionDenied) => "The system won't let Heimdall write the vault file. It, or its folder, may be read-only.",
         (Some(2 | 3 | 21 | 53 | 67 | 1167), _) | (_, ErrorKind::NotFound) => "The vault's drive or folder isn't available. Reconnect it; your changes are still here.",
         _ => return format!("Couldn't save: {io}"),
     };
@@ -77,6 +77,20 @@ pub fn save_error_message(e: &Error) -> String {
 }
 
 // ---------- Recent vaults ----------
+
+/// Where the few things outside any vault live (the recent list):
+/// `%APPDATA%\Heimdall` on Windows, `$XDG_CONFIG_HOME/heimdall` (usually
+/// `~/.config/heimdall`) on Linux.
+pub fn config_dir() -> Option<PathBuf> {
+    if cfg!(windows) {
+        return std::env::var_os("APPDATA").map(|d| Path::new(&d).join("Heimdall"));
+    }
+    let base = std::env::var_os("XDG_CONFIG_HOME")
+        .filter(|d| Path::new(d).is_absolute())
+        .map(PathBuf::from)
+        .or_else(|| std::env::var_os("HOME").map(|h| Path::new(&h).join(".config")))?;
+    Some(base.join("heimdall"))
+}
 
 /// The Welcome list. It lives outside any vault, in plain text, which is
 /// why each vault decides whether it appears here (DESIGN §6.1).
@@ -93,7 +107,7 @@ pub struct RecentEntry {
 
 impl RecentVaults {
     pub fn load() -> Self {
-        let file = std::env::var_os("APPDATA").map(|d| Path::new(&d).join("Heimdall").join("recent.txt"));
+        let file = config_dir().map(|d| d.join("recent.txt"));
         let entries = file
             .as_ref()
             .and_then(|f| std::fs::read_to_string(f).ok())
@@ -149,14 +163,29 @@ impl RecentVaults {
 
 // ---------- Clipboard ----------
 
+/// One clipboard handle for the whole run. On Linux the copied text lives
+/// in this process (X11 and Wayland ask the owner for it), and arboard
+/// serves it only while a handle exists; a handle per copy could lose it.
+fn with_clipboard<R>(f: impl FnOnce(&mut arboard::Clipboard) -> R) -> Option<R> {
+    use std::sync::{Mutex, OnceLock};
+    static CLIPBOARD: OnceLock<Mutex<Option<arboard::Clipboard>>> = OnceLock::new();
+    let mut guard = CLIPBOARD.get_or_init(|| Mutex::new(None)).lock().ok()?;
+    if guard.is_none() {
+        *guard = arboard::Clipboard::new().ok();
+    }
+    guard.as_mut().map(f)
+}
+
 /// Puts text on the clipboard, marked so Windows keeps it out of the
 /// clipboard history (Win+V) and the cloud clipboard, and so clipboard
-/// managers that honor it ignore it (DESIGN §11). Every copy from Heimdall
-/// goes through here (see `HeimdallApp::handle_copies`).
+/// managers that honor it ignore it (DESIGN §11; on Linux only KDE's
+/// password hint exists, §13.1). Every copy from Heimdall goes through here
+/// (see `HeimdallApp::handle_copies`).
 pub fn set_clipboard(text: &str) -> bool {
-    let Ok(mut cb) = arboard::Clipboard::new() else {
-        return false;
-    };
+    with_clipboard(|cb| set_marked(cb, text)).unwrap_or(false)
+}
+
+fn set_marked(cb: &mut arboard::Clipboard, text: &str) -> bool {
     #[cfg(windows)]
     {
         use arboard::SetExtWindows;
@@ -167,7 +196,12 @@ pub fn set_clipboard(text: &str) -> bool {
             .text(text)
             .is_ok()
     }
-    #[cfg(not(windows))]
+    #[cfg(target_os = "linux")]
+    {
+        use arboard::SetExtLinux;
+        cb.set().exclude_from_history().text(text).is_ok()
+    }
+    #[cfg(not(any(windows, target_os = "linux")))]
     {
         cb.set_text(text).is_ok()
     }
@@ -176,7 +210,7 @@ pub fn set_clipboard(text: &str) -> bool {
 /// The text on the clipboard, for Paste in the editor's right-click menu.
 /// Wiped when dropped. `None` if the clipboard holds no text.
 pub fn clipboard_text() -> Option<zeroize::Zeroizing<String>> {
-    let text = zeroize::Zeroizing::new(arboard::Clipboard::new().ok()?.get_text().ok()?);
+    let text = zeroize::Zeroizing::new(with_clipboard(|cb| cb.get_text().ok())??);
     (!text.is_empty()).then_some(text)
 }
 
@@ -223,18 +257,17 @@ impl ClipboardGuard {
         let Some((_, hash)) = self.pending.take() else {
             return;
         };
-        let Ok(mut cb) = arboard::Clipboard::new() else {
-            return;
-        };
-        let ours = cb.get_text().map(|t| {
-            let mut t = t;
-            let same = heimdall_core::crypto::sha256(t.as_bytes()) == hash;
-            zeroize::Zeroize::zeroize(&mut t);
-            same
+        with_clipboard(|cb| {
+            let ours = cb.get_text().map(|t| {
+                let mut t = t;
+                let same = heimdall_core::crypto::sha256(t.as_bytes()) == hash;
+                zeroize::Zeroize::zeroize(&mut t);
+                same
+            });
+            if ours.unwrap_or(false) {
+                let _ = cb.clear();
+            }
         });
-        if ours.unwrap_or(false) {
-            let _ = cb.clear();
-        }
     }
 }
 

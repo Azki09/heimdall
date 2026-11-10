@@ -106,19 +106,29 @@ impl HeimdallApp {
     }
 
     /// Finds the native window on the first frame and starts watching for
-    /// Windows locking or going to sleep (DESIGN §12).
+    /// the session locking or going to sleep (DESIGN §12). On Linux there
+    /// is no handle to keep: the events come from logind (§13.1), and `0`
+    /// only marks that watching started.
     fn attach_window(&mut self, ctx: &egui::Context, frame: &eframe::Frame) {
         if self.window.is_some() {
             return;
         }
-        use raw_window_handle::{HasWindowHandle, RawWindowHandle};
-        let Ok(handle) = frame.window_handle() else {
-            return;
+        #[cfg(windows)]
+        let hwnd = {
+            use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+            let Ok(handle) = frame.window_handle() else {
+                return;
+            };
+            let RawWindowHandle::Win32(h) = handle.as_raw() else {
+                return;
+            };
+            h.hwnd.get()
         };
-        let RawWindowHandle::Win32(h) = handle.as_raw() else {
-            return;
+        #[cfg(not(windows))]
+        let hwnd = {
+            let _ = frame;
+            0
         };
-        let hwnd = h.hwnd.get();
         self.window = Some(hwnd);
         let ctx = ctx.clone();
         heimdall_platform::watch_session(hwnd, move || ctx.request_repaint());
@@ -297,7 +307,8 @@ impl HeimdallApp {
             }
             LockReason::Minimized => "Locked when the window was minimized".to_owned(),
             LockReason::UsbRemoved => "Locked because the USB key was removed".to_owned(),
-            LockReason::WindowsLocked => "Locked when Windows was locked".to_owned(),
+            LockReason::WindowsLocked if cfg!(windows) => "Locked when Windows was locked".to_owned(),
+            LockReason::WindowsLocked => "Locked when the session was locked".to_owned(),
             LockReason::Suspended => "Locked before the computer went to sleep".to_owned(),
         };
         self.screen = Screen::Unlock(Box::new(Unlock::new(path, Some(LockInfo { reason, saved_at }))));

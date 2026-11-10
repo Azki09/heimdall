@@ -1,6 +1,6 @@
 # Heimdall
 
-**An encrypted notepad for Windows. No signal. No trace.**
+**An encrypted notepad for Windows and Linux. No signal. No trace.**
 
 Heimdall is as simple as Notepad: tabs, plain text, one note per tab. The
 difference is that everything you write is saved encrypted, in a single
@@ -22,7 +22,15 @@ in a `.txt` file.
 
 ## Download
 
-Get `heimdall.exe` from the [latest release](https://github.com/Azki09/heimdall/releases/latest).
+From the [latest release](https://github.com/Azki09/heimdall/releases/latest):
+
+- **Windows:** `heimdall.exe`
+- **Linux:** `Heimdall-<version>-x86_64.AppImage`, or the `.tar.gz` (see
+  [Linux](#linux) below)
+
+### Windows
+
+Get `heimdall.exe`.
 It is a single portable file: no installer, nothing else to download. Put it
 anywhere (a folder, or a USB drive) and run it. Windows 10 (version 2004 or
 later) or Windows 11, 64-bit.
@@ -47,6 +55,38 @@ first time it runs Windows SmartScreen may show "Windows protected your
 PC". If the hash matches, choose **More info → Run anyway**. Signing is
 planned through the SignPath Foundation; see
 [Code signing policy](#code-signing-policy).
+
+### Linux
+
+64-bit, with glibc 2.35 or newer (Ubuntu 22.04, Debian 12, Fedora 36 and
+later). Download the AppImage, verify it, make it executable and run it:
+
+```sh
+sha256sum Heimdall-*-x86_64.AppImage   # must match SHA256SUMS.txt
+gh attestation verify Heimdall-*-x86_64.AppImage -R Azki09/heimdall
+chmod +x Heimdall-*-x86_64.AppImage
+./Heimdall-*-x86_64.AppImage
+```
+
+If AppImages don't start on your system (they need FUSE 2), use the
+`.tar.gz`: it holds the `heimdall` executable, a `heimdall.desktop` entry and
+an icon.
+
+The vault format is the same on both systems: a vault made on Windows opens
+on Linux and the other way round. A few protections work differently on
+Linux:
+
+- **Screenshots:** Linux has no way to hide a window from screen capture.
+  On Wayland (the default on current Ubuntu and Fedora) apps need your
+  permission to capture the screen; on X11 any program can.
+- **Clipboard history:** only KDE honors the "don't keep this" mark.
+  Copies are still cleared automatically.
+- **Locking with the session and before sleep** uses logind; it works on
+  GNOME, KDE and most desktops. Idle lock, lock on minimize and Ctrl+L work
+  everywhere.
+- **USB key:** any drive your desktop mounts under `/media` or `/run/media`.
+- **Recovery code:** there is no printing on Linux; copy the words or write
+  them down.
 
 ## Getting started
 
@@ -128,8 +168,9 @@ in Spanish) and summarized in [`SECURITY.md`](SECURITY.md).
 
 ## Building from source
 
-You need [Rust](https://rustup.rs) (stable, 1.82 or newer) and the MSVC
-build tools on Windows.
+You need [Rust](https://rustup.rs) (stable, 1.82 or newer), and the MSVC
+build tools on Windows or a C toolchain (`build-essential`) on Linux.
+On Linux the executable is `target/release/heimdall`.
 
 ```powershell
 cargo build --release -p heimdall-app

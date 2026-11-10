@@ -60,7 +60,7 @@ Un editor de texto tan simple como el Bloc de notas, pero donde todo lo que escr
 
 - **Lenguaje:** Rust (estable).
 - **Interfaz:** `egui` / `eframe`.
-- **Plataforma inicial:** Windows 10/11. El código específico del sistema operativo se aísla en un módulo propio para portar después a Linux/macOS.
+- **Plataformas:** Windows 10/11 y, desde la v1.2, Linux x86_64 (§13.1). El código específico del sistema operativo se aísla en `heimdall-platform`.
 
 ### Crates (librerías) previstas
 | Propósito | Crate |
@@ -710,7 +710,7 @@ Diseño cerrado el 2026-10-30 (v0.4).
 
 ---
 
-## 12. Endurecimiento del proceso (Windows)
+## 12. Endurecimiento del proceso (Windows; Linux en §13.1)
 
 - `zeroize` en todos los buffers con secretos. Uso de `secrecy::SecretBox` para la MK.
 - **`VirtualLock`** sobre la página de la MK (evita el archivo de paginación). Siempre, en todos los perfiles.
@@ -735,15 +735,43 @@ heimdall/
 │   ├── heimdall-core/      Cripto, formato .heim, slots, rotación de MK, recuperación,
 │   │                       modelo de notas. Sin UI ni OS. 100% testeable, objetivo de fuzzing.
 │   ├── heimdall-platform/  Código específico de cada OS: USB, memoria, capturas, eventos.
-│   │   └── windows/        (linux/ y macos/ después)
+│   │                       windows.rs, harden.rs, print.rs (Windows) y linux.rs (§13.1)
 │   └── heimdall-app/       Interfaz egui: pestañas, editor, pantallas, perfiles.
 ├── docs/
 │   ├── DESIGN.md           (este documento)
 │   └── FORMAT.md           Especificación detallada del formato (después)
 ├── fuzz/                   cargo-fuzz sobre el parser del .heim
+├── packaging/linux/        heimdall.desktop y heimdall.svg (AppImage y .tar.gz)
 ├── SECURITY.md             Modelo de amenazas público + cómo reportar vulnerabilidades
 └── LICENSE
 ```
+
+### 13.1 Linux (v1.2)
+
+La misma app de ventana que en Windows: mismas pantallas y el mismo formato `.heim` (una vault creada en un sistema abre en el otro). Solo cambia lo que habla con el sistema operativo, en `heimdall-platform/src/linux.rs`.
+
+| Función | Windows | Linux |
+|---|---|---|
+| Sin volcados de memoria | `SetErrorMode` + filtro de excepciones | `prctl(PR_SET_DUMPABLE, 0)` (tampoco deja que otro proceso del usuario lo inspeccione con `ptrace`) y `RLIMIT_CORE = 0` |
+| Memoria de la MK fuera del disco | `VirtualLock` | `mlock` |
+| Bloquear al suspender | `PBT_APMSUSPEND` | Señal `PrepareForSleep(true)` de logind (D-Bus del sistema) |
+| Bloquear al bloquear la sesión | `WTS_SESSION_LOCK` | Señal `Lock` de la sesión en logind, `LockedHint = true` (GNOME y KDE lo ponen al mostrar su pantalla de bloqueo) y `ActiveChanged(true)` de `org.freedesktop.ScreenSaver` / `org.gnome.ScreenSaver` (D-Bus de la sesión) |
+| Guardar antes de apagar | `WM_QUERYENDSESSION` + `ShutdownBlockReasonCreate` | Con cambios sin guardar se toma un candado de logind `Inhibit("shutdown", …, "delay")`; `PrepareForShutdown(true)` guarda y lo suelta. logind solo espera su `InhibitDelayMaxSec` (normalmente 5 s) |
+| Llave USB | Unidades extraíbles y fijas en el bus USB | Lo que el escritorio monta en `/media/<usuario>/<etiqueta>` o `/run/media/<usuario>/<etiqueta>` (udisks), leído de `/proc/self/mounts`. Se muestra la etiqueta, sin letra de unidad |
+| Ocultar de capturas | `WDA_EXCLUDEFROMCAPTURE` | **No existe.** El ajuste muestra "Not available". En Wayland ninguna app captura la pantalla sin permiso del usuario; en X11 cualquiera puede |
+| Copias fuera del historial | Formatos que Windows respeta | Solo la marca `x-kde-passwordManagerHint` (la respeta KDE). El borrado automático funciona igual. El texto copiado lo sirve el propio proceso: al cerrar Heimdall desaparece del portapapeles salvo que un gestor de portapapeles lo haya guardado |
+| Imprimir el código de recuperación | Diálogo de impresión | **No hay.** Solo *Copy* (decisión del usuario, 2026-11-09) |
+| Lista de vaults recientes | `%APPDATA%\Heimdall` | `$XDG_CONFIG_HOME/heimdall` (normalmente `~/.config/heimdall`) |
+| Tecla Menú | Procedimiento de ventana (`VK_APPS`) | No llega a egui; Shift+F10 sí |
+| Fuentes Consolas y Segoe UI | Del sistema | No existen: no salen en la lista (salvo que la vault ya las tenga elegidas; entonces se usa la incluida equivalente) |
+
+Si una señal de D-Bus no llega (un contenedor sin logind, un escritorio mínimo sin servicio de salvapantallas), ese bloqueo simplemente no ocurre; el bloqueo por inactividad, al minimizar y con Ctrl+L funciona siempre.
+
+**Sin lector de pantalla en ningún sistema** (§10.10): `eframe` se compila sin `accesskit`. Con él, el texto de las notas quedaba publicado para cualquier programa de la sesión (UI Automation en Windows, AT-SPI en Linux).
+
+**Distribución.** Un **AppImage** (un solo archivo, sin instalar) y un **`.tar.gz`** con el ejecutable, `heimdall.desktop`, el ícono y la licencia. Se compila en Ubuntu 22.04, así que funciona con glibc 2.35 o más nueva (Ubuntu 22.04, Debian 12, Fedora 36 y posteriores). Mismo SHA-256 y attestation que el `.exe`. No se firma: en Linux no hay un equivalente a SmartScreen.
+
+**Pruebas.** En Docker, con una pantalla virtual (Xvfb): la interfaz, la carpeta de la USB simulada con `HEIMDALL_FAKE_USB` y señales de logind simuladas. Falta probarlo en un Linux real con escritorio.
 
 ---
 
@@ -758,7 +786,8 @@ heimdall/
 | **v0.5 — Confianza** | Fuzzing, CI con `cargo-audit`/`cargo-deny`, releases firmados, `SECURITY.md` |
 | **v1.1** | YubiKey/FIDO2 |
 | **v1.0** | Formato congelado (§5.6), **menú contextual general** (clic derecho con Cut / Copy / Paste / Select all en cualquier parte del texto), copia de respaldo manual, exportar e importar, cifrado y en texto plano (§10.9) |
-| **Futuro** | Shamir 2-de-3, Linux/macOS, modo terminal (editar la vault desde la consola, como nano o vim) |
+| **v1.2** | Linux (§13.1) |
+| **Futuro** | Menú lateral, generador de contraseñas, etiquetas y notas fijadas; modo terminal (`heimdall archivo.txt`, como nano, con el archivo cifrado); YubiKey; Shamir 2-de-3; macOS |
 
 ### 14.1 Estado (2026-10-29)
 

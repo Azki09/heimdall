@@ -4,6 +4,23 @@ All notable changes to Heimdall. Versions follow
 [Semantic Versioning](https://semver.org). Vaults created by any 1.x version
 keep opening in every later version (`docs/DESIGN.md` section 5.6).
 
+## [Unreleased]
+
+### Linux
+- Heimdall now runs on Linux (x86_64, glibc 2.35 or newer), as an AppImage
+  or a `.tar.gz`. Same app and same vault format as on Windows: a vault
+  opens on both systems.
+- Locks before sleep and when the session locks (logind, GNOME and KDE
+  lock screens), waits for the save on shutdown, finds USB keys under
+  `/media` and `/run/media`.
+- Differences from Windows: no hiding from screen capture, clipboard
+  history exclusion only on KDE, and no printing of the recovery code
+  (copy it instead). See the README.
+
+### Security
+- Screen reader support (accesskit) is now compiled out on every system.
+  It exposed the text of the notes to any program in the session.
+
 ## [1.1.0] - 2026-11-09
 
 ### Keyboard

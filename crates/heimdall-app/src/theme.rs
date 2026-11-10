@@ -77,6 +77,17 @@ pub fn editor_family(ctx: &egui::Context, font: Font) -> FontFamily {
     }
 }
 
+/// Whether the editor font can be used here: the bundled ones always,
+/// Consolas and Segoe UI only where Windows provides them.
+pub fn font_available(ctx: &egui::Context, font: Font) -> bool {
+    let name = match font {
+        Font::JetBrainsMono | Font::Inter => return true,
+        Font::Consolas => CONSOLAS,
+        Font::SegoeUi => SEGOE,
+    };
+    ctx.fonts(|f| f.families().contains(&FontFamily::Name(name.into())))
+}
+
 pub fn install_fonts(ctx: &egui::Context) {
     let mut fonts = FontDefinitions::default();
     let mut add = |name: &str, data: FontData| {

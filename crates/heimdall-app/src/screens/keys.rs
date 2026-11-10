@@ -74,13 +74,20 @@ impl CodeActions {
                 .clicked()
             {
                 crate::support::copy_with_timer(ui.ctx(), &code.phrase(), clear_after_s);
-                self.status = Some(format!(
-                    "Copied. The clipboard is cleared in {clear_after_s} s, and Windows doesn't keep it in its clipboard history."
-                ));
+                self.status = Some(if cfg!(windows) {
+                    format!(
+                        "Copied. The clipboard is cleared in {clear_after_s} s, and Windows doesn't keep it in its clipboard history."
+                    )
+                } else {
+                    format!(
+                        "Copied. The clipboard is cleared in {clear_after_s} s. Paste it into your password manager or write it down."
+                    )
+                });
             }
-            if widgets::button(ui, ButtonKind::Secondary, "Print…", true, vec2(0.0, 34.0))
-                .on_hover_text("Print a recovery sheet")
-                .clicked()
+            if heimdall_platform::CAN_PRINT
+                && widgets::button(ui, ButtonKind::Secondary, "Print…", true, vec2(0.0, 34.0))
+                    .on_hover_text("Print a recovery sheet")
+                    .clicked()
             {
                 let words = code.words();
                 let date = chrono::Local::now().format("%b %-d, %Y").to_string();
@@ -97,10 +104,11 @@ impl CodeActions {
             }
         });
         ui.add_space(6.0);
-        let text = self
-            .status
-            .as_deref()
-            .unwrap_or("Print on paper. A \"Print to PDF\" printer would save the code as a file.");
+        let text = self.status.as_deref().unwrap_or(if heimdall_platform::CAN_PRINT {
+            "Print on paper. A \"Print to PDF\" printer would save the code as a file."
+        } else {
+            "Write the words down on paper, or copy them into a password manager."
+        });
         ui.scope(|ui| {
             ui.set_max_width(460.0);
             ui.add(

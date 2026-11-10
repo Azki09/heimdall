@@ -1,12 +1,14 @@
 //! Code that talks to the operating system (DESIGN §3, §13): listing USB
 //! drives for the key file (§8), printing the recovery sheet (§7) and
-//! process hardening (§12). Only Windows is implemented; other systems get
+//! process hardening (§12), on Windows and Linux (§13.1). Other systems get
 //! stubs so the rest of the code compiles.
 
 use std::path::PathBuf;
 
 #[cfg(windows)]
 mod harden;
+#[cfg(target_os = "linux")]
+mod linux;
 #[cfg(windows)]
 mod print;
 #[cfg(windows)]
@@ -24,7 +26,8 @@ pub struct Drive {
 }
 
 impl Drive {
-    /// `E:` for a real drive.
+    /// `E:` for a Windows drive; the mount point on Linux
+    /// (`/media/ana/KINGSTON`).
     pub fn letter(&self) -> String {
         match self.root.components().next() {
             Some(std::path::Component::Prefix(p)) => p.as_os_str().to_string_lossy().into_owned(),
@@ -49,6 +52,8 @@ impl Drive {
 pub fn init() {
     #[cfg(windows)]
     harden::init();
+    #[cfg(target_os = "linux")]
+    linux::init();
 }
 
 /// Keeps the memory at `address` out of the page file (`VirtualLock`), for
@@ -56,15 +61,21 @@ pub fn init() {
 pub fn lock_memory(address: usize, len: usize) -> bool {
     #[cfg(windows)]
     return harden::lock_memory(address, len);
-    #[cfg(not(windows))]
+    #[cfg(target_os = "linux")]
+    return linux::lock_memory(address, len);
+    #[cfg(not(any(windows, target_os = "linux")))]
     {
         let _ = (address, len);
         false
     }
 }
 
+/// Whether [`set_capture_excluded`] can work on this system.
+pub const CAN_HIDE_FROM_CAPTURE: bool = cfg!(windows);
+
 /// Hides the window from screenshots, screen recording and screen sharing
-/// (it shows black there). `window` is the native handle (`HWND`).
+/// (it shows black there). `window` is the native handle (`HWND`). Linux
+/// has no such thing: always false there (DESIGN §13.1).
 pub fn set_capture_excluded(window: isize, on: bool) -> bool {
     #[cfg(windows)]
     return harden::set_capture_excluded(window, on);
@@ -78,7 +89,7 @@ pub fn set_capture_excluded(window: isize, on: bool) -> bool {
 /// Something that must lock the vault (DESIGN §12).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SessionEvent {
-    /// Windows was locked (Win+L).
+    /// The session was locked (Win+L, the lock screen on Linux).
     Locked,
     /// The computer is going to sleep or hibernate.
     Suspending,
@@ -87,13 +98,16 @@ pub enum SessionEvent {
     Ending,
 }
 
-/// Starts watching for [`SessionEvent`]s on `window`; `wake` is called
-/// when one arrives (to repaint, so the app picks it up). Call once, from
-/// the UI thread.
+/// Starts watching for [`SessionEvent`]s on `window` (the `HWND`; unused
+/// on Linux, which listens to logind on D-Bus); `wake` is called when one
+/// arrives (to repaint, so the app picks it up). Call once, from the UI
+/// thread.
 pub fn watch_session(window: isize, wake: impl Fn() + Send + Sync + 'static) -> bool {
     #[cfg(windows)]
     return harden::watch_session(window, Box::new(wake));
-    #[cfg(not(windows))]
+    #[cfg(target_os = "linux")]
+    return linux::watch_session(window, Box::new(wake));
+    #[cfg(not(any(windows, target_os = "linux")))]
     {
         let _ = (window, wake);
         false
@@ -105,11 +119,14 @@ pub fn watch_session(window: isize, wake: impl Fn() + Send + Sync + 'static) -> 
 pub fn take_session_event() -> Option<SessionEvent> {
     #[cfg(windows)]
     return harden::take_session_event();
-    #[cfg(not(windows))]
+    #[cfg(target_os = "linux")]
+    return linux::take_session_event();
+    #[cfg(not(any(windows, target_os = "linux")))]
     None
 }
 
 /// Whether the Menu key (or Shift+F10) was pressed since the last call.
+/// Windows only; on Linux Shift+F10 reaches egui as a normal key.
 pub fn take_menu_key() -> bool {
     #[cfg(windows)]
     return harden::take_menu_key();
@@ -117,12 +134,15 @@ pub fn take_menu_key() -> bool {
     false
 }
 
-/// Whether the app has unsaved changes right now. While it does, Windows
-/// shutdown and sign-out wait for a save ([`SessionEvent::Ending`]).
+/// Whether the app has unsaved changes right now. While it does, shutdown
+/// and sign-out wait for a save ([`SessionEvent::Ending`]); on Linux only
+/// as long as logind allows (usually 5 s).
 pub fn set_unsaved(unsaved: bool) {
     #[cfg(windows)]
     harden::set_unsaved(unsaved);
-    #[cfg(not(windows))]
+    #[cfg(target_os = "linux")]
+    linux::set_unsaved(unsaved);
+    #[cfg(not(any(windows, target_os = "linux")))]
     let _ = unsaved;
 }
 
@@ -130,6 +150,8 @@ pub fn set_unsaved(unsaved: bool) {
 pub fn allow_end_session() {
     #[cfg(windows)]
     harden::allow_end_session();
+    #[cfg(target_os = "linux")]
+    linux::allow_end_session();
 }
 
 /// USB drives currently connected: removable drives, plus fixed drives on
@@ -144,6 +166,8 @@ pub fn usb_drives() -> Vec<Drive> {
     let mut drives = Vec::new();
     #[cfg(windows)]
     drives.extend(windows::usb_drives());
+    #[cfg(target_os = "linux")]
+    drives.extend(linux::usb_drives());
     #[cfg(debug_assertions)]
     drives.extend(fake_drives());
     drives
@@ -167,6 +191,10 @@ pub enum PrintOutcome {
     Failed(String),
 }
 
+/// Whether this system can print the recovery sheet. Linux can't: the
+/// words are copied instead (DESIGN §13.1).
+pub const CAN_PRINT: bool = cfg!(windows);
+
 /// Shows the Windows print dialog and prints the sheet on the chosen
 /// printer. Nothing is written to disk by Heimdall; the Windows spooler may
 /// keep the page in its own queue until it is printed.
@@ -179,7 +207,7 @@ pub fn print_recovery_sheet(sheet: &RecoverySheet) -> PrintOutcome {
     #[cfg(not(windows))]
     {
         let _ = sheet;
-        PrintOutcome::Failed("Printing is only available on Windows for now.".into())
+        PrintOutcome::Failed("Printing is only available on Windows.".into())
     }
 }
 

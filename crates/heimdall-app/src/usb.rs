@@ -31,8 +31,14 @@ impl UsbKey {
     }
 }
 
+/// `KINGSTON (E:)` on Windows; just `KINGSTON` on Linux, where the
+/// "letter" is a long mount path.
 pub fn drive_label(d: &Drive) -> String {
-    format!("{} ({})", d.name, d.letter())
+    if cfg!(windows) {
+        format!("{} ({})", d.name, d.letter())
+    } else {
+        d.name.clone()
+    }
 }
 
 /// A `.bifrost` file in the root folder of a USB drive.

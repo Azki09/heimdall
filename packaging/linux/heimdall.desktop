@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Heimdall
+GenericName=Encrypted notepad
+Comment=Encrypted, offline notepad. No signal. No trace.
+Exec=heimdall
+Icon=heimdall
+Terminal=false
+Categories=Utility;TextEditor;Security;
+Keywords=notes;notepad;encrypted;password;secret;
+StartupWMClass=heimdall

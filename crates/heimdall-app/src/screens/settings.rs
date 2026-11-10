@@ -546,7 +546,11 @@ fn security(
     let basic = sec.profile == Profile::Basic;
     setting_row(
         ui,
-        "Lock when Windows locks",
+        if cfg!(windows) {
+            "Lock when Windows locks"
+        } else {
+            "Lock when the session locks"
+        },
         Some(("Going to sleep always locks.", TEXT_MUTED)),
         |ui| {
             if basic {
@@ -556,7 +560,12 @@ fn security(
             }
         },
     );
-    let capture_note = if sec.exclude_from_capture {
+    let capture_note = if !heimdall_platform::CAN_HIDE_FROM_CAPTURE {
+        (
+            "Linux can't hide a window from screenshots. On Wayland, apps need your permission to capture the screen.",
+            TEXT_MUTED,
+        )
+    } else if sec.exclude_from_capture {
         (
             "Screenshots, recordings and screen sharing show this window black.",
             TEXT_MUTED,
@@ -565,6 +574,10 @@ fn security(
         ("Screenshots and screen sharing can show your notes.", DANGER)
     };
     setting_row(ui, "Hide window from screenshots", Some(capture_note), |ui| {
+        if !heimdall_platform::CAN_HIDE_FROM_CAPTURE {
+            widgets::label(ui, "Not available", 13.0, TEXT_MUTED);
+            return;
+        }
         if !basic {
             widgets::label(ui, "Always on", 13.0, TEXT_MUTED);
             return;
@@ -758,12 +771,18 @@ fn editor(ui: &mut Ui, s: &mut Session) {
                     }
                 }
             });
-        let fonts = [
+        // Consolas and Segoe UI come from Windows: listed only where they
+        // exist (or are the current choice, from a vault made on Windows).
+        let current = e.font;
+        let fonts: Vec<_> = [
             (Font::JetBrainsMono, "JetBrains Mono".to_owned()),
             (Font::Consolas, "Consolas".to_owned()),
             (Font::Inter, "Inter".to_owned()),
             (Font::SegoeUi, "Segoe UI".to_owned()),
-        ];
+        ]
+        .into_iter()
+        .filter(|(f, _)| *f == current || crate::theme::font_available(ui.ctx(), *f))
+        .collect();
         changed |= combo(ui, "font", &mut e.font, &fonts);
     });
     setting_row(ui, "Tab key inserts", None, |ui| {
