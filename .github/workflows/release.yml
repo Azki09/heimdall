@@ -1,5 +1,5 @@
-# Pushing a tag like v1.2.0 builds Heimdall on GitHub's runners for Windows
-# (heimdall.exe) and Linux (an AppImage and a .tar.gz), and publishes them
+# Pushing a tag like v1.2.1 builds Heimdall on GitHub's runners for Windows
+# (heimdall.exe) and Linux (an AppImage, a .deb and a .tar.gz), and publishes them
 # with their SHA-256 and a build provenance attestation that ties each file
 # to this commit and this workflow run.
 # Users verify with Get-FileHash / sha256sum and `gh attestation verify`
@@ -102,11 +102,52 @@ jobs:
           mkdir dist
           strip target/release/heimdall
 
-          # .tar.gz: the executable, its desktop entry and icon, the license.
+          # .tar.gz: the executable, its desktop entry and icon, the
+          # per-user install.sh / uninstall.sh, the license.
           pkg="heimdall-$version-linux-x86_64"
           mkdir "$pkg"
-          cp target/release/heimdall packaging/linux/heimdall.desktop packaging/linux/heimdall.png LICENSE README.md "$pkg/"
+          cp target/release/heimdall packaging/linux/heimdall.desktop packaging/linux/heimdall.png \
+            packaging/linux/install.sh packaging/linux/uninstall.sh LICENSE README.md "$pkg/"
+          chmod 755 "$pkg/heimdall" "$pkg/install.sh" "$pkg/uninstall.sh"
           tar --owner=0 --group=0 -czf "dist/$pkg.tar.gz" "$pkg"
+
+          # .deb for Debian, Ubuntu and Mint. Built with dpkg-deb (already
+          # on the runner, nothing to download). No maintainer scripts:
+          # dpkg's own triggers refresh the app menu and the icon cache.
+          deb=debroot
+          install -D -m 755 target/release/heimdall "$deb/usr/bin/heimdall"
+          install -D -m 644 packaging/linux/heimdall.desktop "$deb/usr/share/applications/heimdall.desktop"
+          install -D -m 644 packaging/linux/heimdall.png "$deb/usr/share/icons/hicolor/512x512/apps/heimdall.png"
+          install -D -m 644 packaging/linux/copyright "$deb/usr/share/doc/heimdall/copyright"
+          # Libraries the binary links against, as package names, plus the
+          # ones winit and glutin load at run time (dpkg-shlibdeps can't
+          # see those).
+          mkdir -p shlibs/debian && touch shlibs/debian/control
+          linked=$(cd shlibs && dpkg-shlibdeps -O "$GITHUB_WORKSPACE/target/release/heimdall" | sed 's/^shlibs:Depends=//')
+          runtime="libegl1, libgl1, libwayland-client0, libwayland-cursor0, libwayland-egl1, libx11-6, libxcursor1, libxi6, libxkbcommon0, libxkbcommon-x11-0, libxrandr2"
+          debver=$(printf '%s' "$version" | tr - '~')   # 1.3.0-rc1 sorts before 1.3.0
+          mkdir -p "$deb/DEBIAN"
+          cat > "$deb/DEBIAN/control" <<EOF
+          Package: heimdall
+          Version: $debver
+          Architecture: amd64
+          Maintainer: Azki09 <72277529+Azki09@users.noreply.github.com>
+          Installed-Size: $(du -sk "$deb/usr" | cut -f1)
+          Depends: $linked, $runtime
+          Conflicts: heimdall-flash
+          Section: utils
+          Priority: optional
+          Homepage: https://github.com/$GITHUB_REPOSITORY
+          Description: Encrypted, offline notepad
+           Heimdall is as simple as Notepad, but everything you write is saved
+           encrypted in a single .heim file that only opens with your password
+           (and, if you want, a USB key). It never connects to the internet.
+          EOF
+          chmod 644 "$deb/DEBIAN/control"
+          SOURCE_DATE_EPOCH=$(git log -1 --format=%ct) \
+            dpkg-deb --root-owner-group -Zxz --build "$deb" "dist/heimdall_${version}_amd64.deb"
+          dpkg-deb --info "dist/heimdall_${version}_amd64.deb"
+          dpkg-deb --contents "dist/heimdall_${version}_amd64.deb"
 
           # AppImage: one file that runs on its own.
           curl -sSfL -o appimagetool "$APPIMAGETOOL_URL"
@@ -121,6 +162,35 @@ jobs:
           ARCH=x86_64 ./appimagetool --appimage-extract-and-run --no-appstream \
             --runtime-file runtime AppDir "dist/Heimdall-$version-x86_64.AppImage"
           ls -la dist
+      - name: Check the Linux packages
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq desktop-file-utils
+          shellcheck packaging/linux/install.sh packaging/linux/uninstall.sh
+          desktop-file-validate packaging/linux/heimdall.desktop
+
+          # The .deb installs here with every dependency found, and removes.
+          sudo apt-get install -y --no-install-recommends ./dist/heimdall_*_amd64.deb
+          test -x /usr/bin/heimdall
+          test -f /usr/share/icons/hicolor/512x512/apps/heimdall.png
+          desktop-file-validate /usr/share/applications/heimdall.desktop
+          sudo apt-get remove -y heimdall
+          test ! -e /usr/bin/heimdall
+
+          # install.sh and uninstall.sh, in a throwaway home.
+          home=$(mktemp -d)
+          tar xzf dist/heimdall-*-linux-x86_64.tar.gz -C "$home"
+          env -u XDG_DATA_HOME -u XDG_CONFIG_HOME HOME="$home" sh "$home"/heimdall-*/install.sh
+          entry="$home/.local/share/applications/heimdall.desktop"
+          test -x "$home/.local/bin/heimdall"
+          test -f "$home/.local/share/icons/hicolor/512x512/apps/heimdall.png"
+          grep -qx "Exec=\"$home/.local/bin/heimdall\"" "$entry"
+          desktop-file-validate "$entry"
+          env -u XDG_DATA_HOME -u XDG_CONFIG_HOME HOME="$home" sh "$home/.local/share/heimdall/uninstall.sh"
+          test ! -e "$home/.local/bin/heimdall"
+          test ! -e "$entry"
+          test ! -e "$home/.local/share/heimdall"
       - uses: actions/upload-artifact@v7
         with:
           name: dist-linux
@@ -169,6 +239,7 @@ jobs:
             dist/heimdall.exe
             dist/*.AppImage
             dist/*.tar.gz
+            dist/*.deb
       - name: Publish release
         env:
           GH_TOKEN: ${{ github.token }}

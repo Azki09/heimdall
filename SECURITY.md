@@ -80,8 +80,8 @@ Heimdall does **not** protect against:
 
 ## Verifying a release
 
-Every release on GitHub includes `heimdall.exe` (Windows), an AppImage and
-a `.tar.gz` (Linux), a `SHA256SUMS.txt` file and a build provenance
+Every release on GitHub includes `heimdall.exe` (Windows), an AppImage, a
+`.deb` and a `.tar.gz` (Linux), a `SHA256SUMS.txt` file and a build provenance
 attestation that ties each file to the exact commit and workflow run that
 produced it.
 
@@ -101,7 +101,7 @@ On Linux, the same two checks:
 
 ```sh
 sha256sum -c --ignore-missing SHA256SUMS.txt
-gh attestation verify Heimdall-*-x86_64.AppImage -R Azki09/heimdall
+gh attestation verify Heimdall-*-x86_64.AppImage -R Azki09/heimdall   # or the .deb / .tar.gz
 ```
 
 If either check fails, do not run the file.

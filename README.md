@@ -25,8 +25,8 @@ in a `.txt` file.
 From the [latest release](https://github.com/Azki09/heimdall/releases/latest):
 
 - **Windows:** `heimdall.exe`
-- **Linux:** `Heimdall-<version>-x86_64.AppImage`, or the `.tar.gz` (see
-  [Linux](#linux) below)
+- **Linux:** `heimdall_<version>_amd64.deb` (Debian, Ubuntu, Mint), the
+  `.tar.gz` (any distribution) or the AppImage (see [Linux](#linux) below)
 
 ### Windows
 
@@ -59,18 +59,73 @@ planned through the SignPath Foundation; see
 ### Linux
 
 64-bit, with glibc 2.35 or newer (Ubuntu 22.04, Debian 12, Fedora 36 and
-later). Download the AppImage, verify it, make it executable and run it:
+later). There are three downloads; pick one:
+
+| You use | Download | Shows up in the app menu |
+|---|---|---|
+| Ubuntu, Debian, Mint, Pop!_OS | `heimdall_<version>_amd64.deb` | Yes |
+| Fedora, Arch, openSUSE, any other | `heimdall-<version>-linux-x86_64.tar.gz` + `install.sh` | Yes |
+| A USB drive, or no install at all | `Heimdall-<version>-x86_64.AppImage` | No, run the file |
+
+In every case, first download the file and `SHA256SUMS.txt` and verify
+them. Set `version` to the number of the
+[latest release](https://github.com/Azki09/heimdall/releases/latest):
 
 ```sh
-sha256sum Heimdall-*-x86_64.AppImage   # must match SHA256SUMS.txt
-gh attestation verify Heimdall-*-x86_64.AppImage -R Azki09/heimdall
-chmod +x Heimdall-*-x86_64.AppImage
-./Heimdall-*-x86_64.AppImage
+version=1.2.1
+base=https://github.com/Azki09/heimdall/releases/download/v$version
+cd ~/Downloads
+curl -LO "$base/SHA256SUMS.txt"
 ```
 
-If AppImages don't start on your system (they need FUSE 2), use the
-`.tar.gz`: it holds the `heimdall` executable, a `heimdall.desktop` entry and
-an icon.
+**Ubuntu, Debian, Mint (.deb).** Installs for every user of the computer,
+with its menu entry and icon:
+
+```sh
+curl -LO "$base/heimdall_${version}_amd64.deb"
+sha256sum -c --ignore-missing SHA256SUMS.txt          # must say OK
+gh attestation verify "heimdall_${version}_amd64.deb" -R Azki09/heimdall   # optional
+sudo apt install "./heimdall_${version}_amd64.deb"
+```
+
+Open it from the app menu ("Heimdall") or with `heimdall` in a terminal. To
+update, install the new `.deb` the same way. To remove it:
+`sudo apt remove heimdall`.
+
+**Any distribution (.tar.gz + install.sh).** Installs only for you, in your
+home folder, without sudo:
+
+```sh
+curl -LO "$base/heimdall-$version-linux-x86_64.tar.gz"
+sha256sum -c --ignore-missing SHA256SUMS.txt          # must say OK
+gh attestation verify "heimdall-$version-linux-x86_64.tar.gz" -R Azki09/heimdall   # optional
+tar xzf "heimdall-$version-linux-x86_64.tar.gz"
+./heimdall-$version-linux-x86_64/install.sh
+```
+
+`install.sh` copies the program to `~/.local/bin`, its menu entry to
+`~/.local/share/applications` and its icon to `~/.local/share/icons`. It
+downloads nothing and asks for no password. If Heimdall doesn't appear in
+the menu right away, log out and back in. To update, run the new version's
+`install.sh`. To remove it: `~/.local/share/heimdall/uninstall.sh`.
+
+**Portable (AppImage).** One file that runs without installing anything,
+for example from a USB drive. It does not add itself to the app menu:
+
+```sh
+curl -LO "$base/Heimdall-$version-x86_64.AppImage"
+sha256sum -c --ignore-missing SHA256SUMS.txt          # must say OK
+gh attestation verify "Heimdall-$version-x86_64.AppImage" -R Azki09/heimdall   # optional
+chmod +x "Heimdall-$version-x86_64.AppImage"
+"./Heimdall-$version-x86_64.AppImage"
+```
+
+AppImages need FUSE 2 (`sudo apt install libfuse2` on Ubuntu 22.04,
+`libfuse2t64` on 24.04). If it doesn't start, use one of the other two.
+
+Removing Heimdall never deletes your vaults (`.heim` files). The list of
+recent vaults stays in `~/.config/heimdall`; delete that folder too if you
+want no trace left.
 
 The vault format is the same on both systems: a vault made on Windows opens
 on Linux and the other way round. A few protections work differently on

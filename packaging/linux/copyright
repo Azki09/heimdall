@@ -1,0 +1,30 @@
+Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
+Upstream-Name: Heimdall
+Source: https://github.com/Azki09/heimdall
+
+Files: *
+Copyright: 2026 Azki09
+License: GPL-3.0-only
+ This program is free software: you can redistribute it and/or modify
+ it under the terms of the GNU General Public License version 3 as
+ published by the Free Software Foundation.
+ .
+ This program is distributed in the hope that it will be useful,
+ but WITHOUT ANY WARRANTY; without even the implied warranty of
+ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ GNU General Public License for more details.
+ .
+ On Debian systems, the complete text of the GNU General Public License
+ version 3 can be found in /usr/share/common-licenses/GPL-3.
+
+Comment:
+ Built into the program, under their own licenses (full texts in the
+ source repository under crates/heimdall-app/assets/ and in Heimdall's
+ Settings, About):
+ .
+ Inter font: Copyright 2016 The Inter Project Authors, SIL OFL 1.1.
+ JetBrains Mono font: Copyright 2020 The JetBrains Mono Project Authors,
+ SIL OFL 1.1.
+ en_US spelling dictionary: SCOWL, by Kevin Atkinson and others.
+ es_MX spelling dictionary: RLA-ES project, GPL-3.0+, LGPL-3.0+ or
+ MPL-1.1+.

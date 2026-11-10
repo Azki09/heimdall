@@ -4,6 +4,91 @@ All notable changes to Heimdall. Versions follow
 [Semantic Versioning](https://semver.org). Vaults created by any 1.x version
 keep opening in every later version (`docs/DESIGN.md` section 5.6).
 
+## [1.2.1] - 2026-11-10
+
+### Which file do I download?
+
+| Your system | File | Shows up in the app menu |
+|---|---|---|
+| Windows 10 / 11 (64-bit) | `heimdall.exe` | No installer, run the file |
+| Ubuntu, Debian, Mint (22.04 / 12 or newer) | `heimdall_1.2.1_amd64.deb` | Yes |
+| Any other Linux x86_64 (Fedora 36+, Arch, ...) | `heimdall-1.2.1-linux-x86_64.tar.gz` + `install.sh` | Yes |
+| Linux, portable (USB drive, no install) | `Heimdall-1.2.1-x86_64.AppImage` | No, run the file |
+
+`SHA256SUMS.txt` holds the hash of every file, to check your download.
+
+### Install on Windows
+In PowerShell: download, verify and run `heimdall.exe` (no installer):
+
+```powershell
+cd $HOME\Downloads
+$base = "https://github.com/Azki09/heimdall/releases/download/v1.2.1"
+Invoke-WebRequest "$base/heimdall.exe" -OutFile heimdall.exe
+Invoke-WebRequest "$base/SHA256SUMS.txt" -OutFile SHA256SUMS.txt
+$expected = (Select-String 'heimdall\.exe$' SHA256SUMS.txt).Line.Split(' ')[0]
+if ((Get-FileHash heimdall.exe).Hash -eq $expected) { "OK" } else { "MISMATCH: do not run it" }
+gh attestation verify heimdall.exe -R Azki09/heimdall   # optional, needs the GitHub CLI
+.\heimdall.exe
+```
+
+The executable is not signed yet, so the first time Windows SmartScreen
+may show "Windows protected your PC". If the hash matched, choose
+**More info → Run anyway**.
+
+### Install on Linux
+First download the hash list:
+
+```sh
+cd ~/Downloads
+base=https://github.com/Azki09/heimdall/releases/download/v1.2.1
+curl -LO "$base/SHA256SUMS.txt"
+```
+
+**Ubuntu, Debian, Mint (.deb)**, for every user of the computer:
+
+```sh
+curl -LO "$base/heimdall_1.2.1_amd64.deb"
+sha256sum -c --ignore-missing SHA256SUMS.txt   # must say OK
+gh attestation verify heimdall_1.2.1_amd64.deb -R Azki09/heimdall   # optional
+sudo apt install ./heimdall_1.2.1_amd64.deb
+```
+
+Open it from the app menu or with `heimdall`. Remove: `sudo apt remove heimdall`.
+
+**Any distribution (.tar.gz + install.sh)**, only for you, without sudo:
+
+```sh
+curl -LO "$base/heimdall-1.2.1-linux-x86_64.tar.gz"
+sha256sum -c --ignore-missing SHA256SUMS.txt   # must say OK
+gh attestation verify heimdall-1.2.1-linux-x86_64.tar.gz -R Azki09/heimdall   # optional
+tar xzf heimdall-1.2.1-linux-x86_64.tar.gz
+./heimdall-1.2.1-linux-x86_64/install.sh
+```
+
+If it doesn't appear in the menu right away, log out and back in. Remove:
+`~/.local/share/heimdall/uninstall.sh`.
+
+**Portable (AppImage)**, nothing installed, not in the menu:
+
+```sh
+curl -LO "$base/Heimdall-1.2.1-x86_64.AppImage"
+sha256sum -c --ignore-missing SHA256SUMS.txt   # must say OK
+chmod +x Heimdall-1.2.1-x86_64.AppImage
+./Heimdall-1.2.1-x86_64.AppImage
+```
+
+AppImages need FUSE 2 (`sudo apt install libfuse2` on Ubuntu 22.04,
+`libfuse2t64` on 24.04).
+
+Removing Heimdall never deletes your vaults (`.heim` files).
+
+### Linux
+- Heimdall can now be installed so it shows up in the app menu like any
+  other app. New `.deb` package for Debian, Ubuntu and Mint. The `.tar.gz`
+  now includes `install.sh`, which installs for the current user only,
+  without sudo, and `uninstall.sh` to remove it. The AppImage stays the
+  portable option.
+
 ## [1.2.0] - 2026-11-09
 
 ### Which file do I download?
@@ -168,6 +253,7 @@ First stable release.
 - Releases built by GitHub Actions with a statically linked C runtime,
   published with SHA-256 checksums and a build provenance attestation.
 
+[1.2.1]: https://github.com/Azki09/heimdall/releases/tag/v1.2.1
 [1.2.0]: https://github.com/Azki09/heimdall/releases/tag/v1.2.0
 [1.1.0]: https://github.com/Azki09/heimdall/releases/tag/v1.1.0
 [1.0.0]: https://github.com/Azki09/heimdall/releases/tag/v1.0.0
