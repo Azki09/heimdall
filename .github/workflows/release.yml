@@ -1,4 +1,4 @@
-# Pushing a tag like v1.2.1 builds Heimdall on GitHub's runners for Windows
+# Pushing a tag like v1.2.2 builds Heimdall on GitHub's runners for Windows
 # (heimdall.exe) and Linux (an AppImage, a .deb and a .tar.gz), and publishes them
 # with their SHA-256 and a build provenance attestation that ties each file
 # to this commit and this workflow run.
