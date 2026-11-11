@@ -1,14 +1,15 @@
 //! Masked secrets in the editor (DESIGN §11): how they are laid out, the
-//! Reveal and Copy icons drawn after them, keeping the caret out of them,
-//! and the paste detector. What counts as a secret is decided in
+//! Reveal and Copy icons that float above them, keeping the caret out of
+//! them, and the paste detector. What counts as a secret is decided in
 //! `heimdall_core::secret`.
 //!
 //! The text edit's galley must keep every character of the note, so a
 //! masked secret isn't removed from the layout: its characters are drawn
 //! transparent, the value in a tiny font, and the `{*` gets the letter
-//! spacing that makes every masked secret exactly as wide as the block
-//! plus the icons. The block and icons are painted over that room; a
-//! revealed secret gets the room for the icons from its `*}`.
+//! spacing that makes every masked secret exactly as wide as the block.
+//! The block is painted under that room. A revealed secret shows its value
+//! inside the block: its delimiters shrink to a small padding on each side.
+//! The icons take no room in the text: they float above the block.
 
 use std::ops::Range;
 
@@ -21,10 +22,15 @@ use heimdall_core::secret;
 use crate::theme::*;
 use crate::widgets;
 
-/// Each icon's box, both icons, and the gap between the block and them.
+/// Each icon's box, and both icons.
 const ICON: f32 = 18.0;
 const ICONS_W: f32 = ICON * 2.0;
-const GAP: f32 = 6.0;
+/// Room around the icons inside their floating pill, and between the pill
+/// and the block.
+const PILL_PAD: f32 = 3.0;
+const PILL_GAP: f32 = 4.0;
+/// Room on each side of a revealed value, inside its block.
+const VALUE_PAD: f32 = 4.0;
 /// Font size of a masked value: next to nothing, so its length barely
 /// changes the width (what is left is made up for, see [`restyle`]).
 const HIDDEN_SIZE: f32 = 0.2;
@@ -89,39 +95,36 @@ pub fn restyle(
             .x
     };
     let open_w = width(font, secret::OPEN);
-    let close_w = width(font, secret::CLOSE);
     let mask_w = font.size * MASK_EMS;
 
-    // (range, letter spacing of a visible-width section or None for 1 px)
-    let mut edits: Vec<(Range<usize>, Option<f32>)> = Vec::new();
+    // (range, in the note's font (else the tiny one), letter spacing)
+    let mut edits: Vec<(Range<usize>, bool, f32)> = Vec::new();
     for (i, r) in scan.secrets.iter().enumerate() {
         let open = r.start..r.start + secret::OPEN.len();
         if revealed(i) {
-            edits.push((open, None));
+            // Both delimiters shrink to the padding inside the block.
             let close = r.end - secret::CLOSE.len()..r.end;
-            edits.push((close, Some((GAP + ICONS_W - close_w).max(0.0))));
+            edits.push((open, false, VALUE_PAD));
+            edits.push((close, false, VALUE_PAD));
         } else {
             let rest = width(&tiny, &job.text[open.end..r.end]);
-            edits.push((
-                open.clone(),
-                Some((mask_w + GAP + ICONS_W - open_w - rest).max(0.0)),
-            ));
-            edits.push((open.end..r.end, None));
+            edits.push((open.clone(), true, (mask_w - open_w - rest).max(0.0)));
+            edits.push((open.end..r.end, false, 0.0));
         }
     }
     for &e in &scan.escapes {
-        edits.push((e..e + 1, None));
+        edits.push((e..e + 1, false, 0.0));
     }
-    edits.sort_by_key(|(r, _)| r.start);
+    edits.sort_by_key(|(r, _, _)| r.start);
 
     let edits: Vec<(Range<usize>, TextFormat)> = edits
         .into_iter()
-        .map(|(range, spacing)| {
+        .map(|(range, full_size, spacing)| {
             let base = format_at(&job.sections, range.start);
             let format = TextFormat {
                 color: Color32::TRANSPARENT,
-                extra_letter_spacing: spacing.unwrap_or(0.0),
-                font_id: if spacing.is_some() {
+                extra_letter_spacing: spacing,
+                font_id: if full_size {
                     base.font_id.clone()
                 } else {
                     tiny.clone()
@@ -198,9 +201,11 @@ fn replace_sections(
 // ---------- Drawing ----------
 
 pub enum IconEvent {
-    /// Reveal was clicked (or, holding to reveal, is held down).
+    /// Reveal was clicked (or, holding to reveal, is held down), or a
+    /// revealed value was clicked to hide it.
     Reveal,
-    Copy,
+    /// Copy was clicked; the point is above the icon, for the "Copied" note.
+    Copy(Pos2),
     /// Right-clicked on an icon, at this point: the secret's menu.
     Menu(Pos2),
 }
@@ -214,171 +219,266 @@ pub struct Screen<'a> {
     pub font: &'a FontId,
 }
 
+/// Where one secret is on screen.
+struct Slot {
+    /// The block, one rect per row it spans (a revealed value can wrap).
+    blocks: Vec<Rect>,
+    /// The pill with the icons, above the block's first row (below it at
+    /// the top of the view). It doesn't move when the value is revealed,
+    /// so the eye stays under the pointer.
+    pill: Rect,
+}
+
 impl Screen<'_> {
-    /// The whole room a secret takes on screen (block and icons), the
-    /// block behind its value, and where the icons go.
-    fn rects(&self, item: &Item) -> (Rect, Rect, Rect) {
-        let start = self.galley.pos_from_ccursor(CCursor {
+    fn slot(&self, item: &Item) -> Slot {
+        let start_c = self.galley.from_ccursor(CCursor {
             index: item.chars.0,
             prefer_next_row: true,
         });
-        let end = self.galley.pos_from_ccursor(CCursor::new(item.chars.1));
-        let row = |left: f32, right: f32, top: f32| {
+        let end_c = self.galley.from_ccursor(CCursor::new(item.chars.1));
+        let start = self.galley.pos_from_cursor(&start_c);
+        let end = self.galley.pos_from_cursor(&end_c);
+        let at = |left: f32, right: f32, top: f32| {
             Rect::from_min_max(pos2(left, top), pos2(right, top + self.glyph_h))
                 .translate(self.origin.to_vec2())
         };
-        let mask_w = self.font.size * MASK_EMS;
-        let one_row = (end.top() - start.top()).abs() < 1.0;
-        if one_row {
-            let icons_left = end.left() - ICONS_W;
-            let all = row(start.left(), end.left(), start.top());
-            let block = row(start.left(), (icons_left - GAP).max(start.left()), start.top());
-            return (all, block, row(icons_left, end.left(), start.top()));
+        let (first_row, last_row) = (start_c.rcursor.row, end_c.rcursor.row);
+        let mut blocks = Vec::new();
+        if first_row == last_row {
+            blocks.push(at(start.left(), end.left(), start.top()));
+        } else if item.revealed {
+            for r in first_row..=last_row {
+                let Some(row) = self.galley.rows.get(r) else {
+                    break;
+                };
+                let left = if r == first_row {
+                    start.left()
+                } else {
+                    row.rect.left()
+                };
+                let right = if r == last_row {
+                    end.left()
+                } else {
+                    row.rect.right()
+                };
+                if right - left >= 1.0 {
+                    blocks.push(at(left, right, row.rect.top()));
+                }
+            }
         }
-        if item.revealed && end.left() >= ICONS_W {
-            // Wrapped inside the value: the icons follow it on its last row.
-            let icons = row(end.left() - ICONS_W, end.left(), end.top());
-            let block = row(start.left(), start.left(), start.top());
-            return (block.union(icons), block, icons);
+        if blocks.is_empty() {
+            // A masked secret wrapped inside its room: draw it whole where it starts.
+            let x = start.left();
+            blocks.push(at(x, x + self.font.size * MASK_EMS, start.top()));
         }
-        // Wrapped inside the room: block and icons from the start.
-        let (x, top) = (start.left(), start.top());
-        let block = row(x, x + mask_w, top);
-        let icons = row(x + mask_w + GAP, x + mask_w + GAP + ICONS_W, top);
-        (block.union(icons), block, icons)
+
+        let first = blocks[0];
+        let size = vec2(ICONS_W + 2.0 * PILL_PAD, self.glyph_h + 2.0 * PILL_PAD);
+        let mut pill = Rect::from_min_size(
+            pos2(first.left() - 2.0, first.top() - 2.0 - PILL_GAP - size.y),
+            size,
+        );
+        if pill.top() < self.viewport.top() {
+            pill = pill.translate(vec2(0.0, size.y + first.height() + 2.0 * (PILL_GAP + 2.0)));
+        }
+        let shift = (pill.right() - self.viewport.right() + 2.0).max(0.0);
+        pill = pill.translate(vec2(-shift, 0.0));
+        Slot { blocks, pill }
     }
 
     /// The block behind each secret on screen (drawn under the text).
     pub fn backgrounds(&self, items: &[Item]) -> Vec<Shape> {
         items
             .iter()
-            .map(|it| self.rects(it).1)
+            .flat_map(|it| self.slot(it).blocks)
             .filter(|r| r.width() > 0.0 && self.viewport.intersects(*r))
             .map(|r| Shape::rect_filled(r.expand2(vec2(2.0, 2.0)), CornerRadius::same(4), BLOCK))
             .collect()
     }
 
-    /// The icons after each secret, only while the pointer is over it (or
-    /// its value is showing in a bubble, `popped`); returns what was
-    /// clicked, by index. With `hold`, Reveal reports while held on it.
+    /// The pill with Reveal and Copy, for one secret at a time: the one
+    /// the pointer is on (DESIGN §11.1). A click on a value in `shown` (one
+    /// secret's Reveal) hides it. Returns what was clicked, by index. With
+    /// `hold`, Reveal reports while held on it.
     pub fn icons(
         &self,
         ui: &Ui,
         id: egui::Id,
         items: &[Item],
-        popped: &[usize],
+        shown: &[usize],
         hold: bool,
     ) -> Vec<(usize, IconEvent)> {
-        let painter = ui.painter_at(self.viewport);
         let pointer = ui
             .ctx()
             .pointer_hover_pos()
             .filter(|p| self.viewport.contains(*p));
+        let slots: Vec<Option<Slot>> = items
+            .iter()
+            .map(|it| Some(self.slot(it)).filter(|s| self.viewport.intersects(s.blocks[0])))
+            .collect();
         let mut events = Vec::new();
-        for (i, it) in items.iter().enumerate() {
-            let (all, _, icons) = self.rects(it);
-            let popped = popped.contains(&i);
-            let over = pointer.is_some_and(|p| all.expand(2.0).contains(p));
-            if !self.viewport.intersects(icons) || !(over || popped) {
-                continue;
-            }
-            let eye = Rect::from_min_size(icons.min, vec2(ICON, self.glyph_h));
-            let copy = eye.translate(vec2(ICON, 0.0));
-            let eye_resp = ui.interact(
-                eye.intersect(self.viewport),
-                id.with(("secret_eye", i)),
-                Sense::click(),
-            );
-            let copy_resp = ui.interact(
-                copy.intersect(self.viewport),
-                id.with(("secret_copy", i)),
-                Sense::click(),
-            );
 
-            let color = |hovered: bool, on: bool| if hovered || on { TEXT } else { ICON_MUTED };
-            widgets::icon_eye(
-                &painter,
-                eye.center(),
-                color(eye_resp.hovered(), it.revealed || popped),
-            );
-            widgets::icon_copy(&painter, copy.center(), color(copy_resp.hovered(), false));
-            for r in [&eye_resp, &copy_resp] {
-                if r.hovered() {
-                    ui.ctx().set_cursor_icon(CursorIcon::PointingHand);
-                }
-                if r.secondary_clicked() {
-                    if let Some(pos) = r.interact_pointer_pos() {
-                        events.push((i, IconEvent::Menu(pos)));
+        // A revealed value hides with a click on it (not when holding).
+        // Registered before the pill, so the pill wins where they overlap.
+        if !hold {
+            for &i in shown {
+                let Some(Some(slot)) = slots.get(i) else {
+                    continue;
+                };
+                for (k, b) in slot.blocks.iter().enumerate() {
+                    let resp = ui.interact(
+                        b.expand(2.0).intersect(self.viewport),
+                        id.with(("secret_value", i, k)),
+                        Sense::click(),
+                    );
+                    if resp.hovered() {
+                        ui.ctx().set_cursor_icon(CursorIcon::PointingHand);
+                    }
+                    if resp.clicked() {
+                        events.push((i, IconEvent::Reveal));
+                    }
+                    if resp.secondary_clicked() {
+                        if let Some(pos) = resp.interact_pointer_pos() {
+                            events.push((i, IconEvent::Menu(pos)));
+                        }
                     }
                 }
             }
-            let reveal_tip = if hold {
-                "Hold to reveal"
-            } else if it.revealed || popped {
-                "Hide"
-            } else {
-                "Reveal for 5 seconds"
-            };
-            let eye_down = eye_resp.is_pointer_button_down_on();
-            if (hold && eye_down) || (!hold && eye_resp.clicked()) {
-                events.push((i, IconEvent::Reveal));
-            }
-            eye_resp.on_hover_text(reveal_tip);
-            if copy_resp.clicked() {
-                events.push((i, IconEvent::Copy));
-            }
-            copy_resp.on_hover_text("Copy");
         }
-        events
-    }
 
-    /// The value of each secret in `popped`, in a bubble above it (below
-    /// it at the top of the view). The text doesn't move, so neither do the
-    /// icons under the pointer.
-    pub fn bubbles(&self, ui: &Ui, text: &str, items: &[Item], popped: &[usize]) {
+        let active_id = id.with("secret_active");
+        let previous: Option<usize> = ui.ctx().data(|d| d.get_temp(active_id)).flatten();
+        let active = active_secret(&slots, previous, pointer);
+        ui.ctx().data_mut(|d| d.insert_temp(active_id, active));
+        let Some(i) = active else {
+            return events;
+        };
+        let (Some(Some(slot)), Some(it)) = (slots.get(i), items.get(i)) else {
+            return events;
+        };
+        let shown = shown.contains(&i);
+
         let painter = ui
             .ctx()
-            .layer_painter(egui::LayerId::new(
-                egui::Order::Foreground,
-                egui::Id::new("secret_bubbles"),
-            ))
+            .layer_painter(egui::LayerId::new(egui::Order::Middle, id.with("secret_pills")))
             .with_clip_rect(self.viewport);
-        let pad = vec2(8.0, 4.0);
-        for &i in popped {
-            let Some(it) = items.get(i) else {
-                continue;
-            };
-            let (_, block, _) = self.rects(it);
-            if !self.viewport.intersects(block) {
-                continue;
+        painter.rect(
+            slot.pill,
+            CornerRadius::same(6),
+            POPUP,
+            egui::Stroke::new(1.0_f32, POPUP_BORDER),
+            egui::StrokeKind::Inside,
+        );
+        let eye = Rect::from_min_size(slot.pill.min + vec2(PILL_PAD, PILL_PAD), vec2(ICON, self.glyph_h));
+        let copy = eye.translate(vec2(ICON, 0.0));
+        let eye_resp = ui.interact(
+            eye.intersect(self.viewport),
+            id.with(("secret_eye", i)),
+            Sense::click(),
+        );
+        let copy_resp = ui.interact(
+            copy.intersect(self.viewport),
+            id.with(("secret_copy", i)),
+            Sense::click(),
+        );
+
+        let color = |hovered: bool, on: bool| if hovered || on { TEXT } else { ICON_MUTED };
+        widgets::icon_eye(
+            &painter,
+            eye.center(),
+            color(eye_resp.hovered(), it.revealed || shown),
+        );
+        widgets::icon_copy(&painter, copy.center(), color(copy_resp.hovered(), false));
+        for r in [&eye_resp, &copy_resp] {
+            if r.hovered() {
+                ui.ctx().set_cursor_icon(CursorIcon::PointingHand);
             }
-            let value = text[secret::value(&it.bytes)].to_owned();
-            let wrap = (self.viewport.width() - 2.0 * pad.x - 8.0).max(40.0);
-            let galley = painter.layout(value, self.font.clone(), TEXT, wrap);
-            let size = galley.size() + 2.0 * pad;
-            let mut r = Rect::from_min_size(pos2(block.left() - 2.0, block.top() - 6.0 - size.y), size);
-            if r.top() < self.viewport.top() {
-                r = r.translate(vec2(0.0, size.y + block.height() + 12.0));
+            if r.secondary_clicked() {
+                if let Some(pos) = r.interact_pointer_pos() {
+                    events.push((i, IconEvent::Menu(pos)));
+                }
             }
-            let shift = (r.right() - self.viewport.right() + 4.0).max(0.0);
-            let r = r.translate(vec2(-shift.min(r.left() - self.viewport.left()).max(0.0), 0.0));
-            painter.rect(
-                r,
-                CornerRadius::same(6),
-                POPUP,
-                egui::Stroke::new(1.0_f32, POPUP_BORDER),
-                egui::StrokeKind::Inside,
-            );
-            painter.galley(r.min + pad, galley, TEXT);
         }
+        let reveal_tip = if hold {
+            "Hold to reveal"
+        } else if shown {
+            "Hide"
+        } else {
+            "Reveal for 5 seconds"
+        };
+        let eye_down = eye_resp.is_pointer_button_down_on();
+        if (hold && eye_down) || (!hold && eye_resp.clicked()) {
+            events.push((i, IconEvent::Reveal));
+        }
+        eye_resp.on_hover_text(reveal_tip);
+        if copy_resp.clicked() {
+            events.push((i, IconEvent::Copy(pos2(copy.center().x, slot.pill.top()))));
+        }
+        copy_resp.on_hover_text("Copy");
+        events
     }
 
     /// The secret under a point, if any.
     pub fn at(&self, items: &[Item], pos: Pos2) -> Option<usize> {
         items
             .iter()
-            .position(|it| self.rects(it).0.expand(2.0).contains(pos))
+            .position(|it| self.slot(it).blocks.iter().any(|b| b.expand(2.0).contains(pos)))
     }
+}
+
+/// Which secret shows its pill: only one at a time, because a pill can
+/// cover the secret on the line above. The pill on screen keeps it while
+/// the pointer is on the pill, its own block or the gap between them;
+/// otherwise the block under the pointer gets it.
+fn active_secret(slots: &[Option<Slot>], previous: Option<usize>, pointer: Option<Pos2>) -> Option<usize> {
+    let p = pointer?;
+    if let Some(Some(slot)) = previous.and_then(|i| slots.get(i)) {
+        let first = slot.blocks[0];
+        // The strip between the pill and its block, as wide as the pill.
+        let (top, bottom) = if slot.pill.center().y < first.center().y {
+            (slot.pill.bottom(), first.top())
+        } else {
+            (first.bottom(), slot.pill.top())
+        };
+        let gap = Rect::from_x_y_ranges(slot.pill.x_range(), top..=bottom.max(top)).expand(2.0);
+        let on_own_block = slot.blocks.iter().any(|b| b.expand(2.0).contains(p));
+        let on_pill_or_gap = slot.pill.expand(2.0).contains(p) || gap.contains(p);
+        if on_own_block || on_pill_or_gap {
+            return previous;
+        }
+    }
+    slots.iter().position(|s| {
+        s.as_ref()
+            .is_some_and(|s| s.blocks.iter().any(|b| b.expand(2.0).contains(p)))
+    })
+}
+
+/// "Copied · clears in N s": a small note centered above `at`, which the
+/// caller shows for a moment (DESIGN §11.1).
+pub fn copied_note(ctx: &egui::Context, at: Pos2, clear_after_s: u32) {
+    let painter = ctx.layer_painter(egui::LayerId::new(
+        egui::Order::Foreground,
+        egui::Id::new("secret_copied"),
+    ));
+    let text = format!("Copied \u{b7} clears in {clear_after_s} s");
+    let galley = painter.layout_no_wrap(text, crate::theme::ui(12.0), TEXT);
+    let pad = vec2(9.0, 6.0);
+    let size = galley.size() + 2.0 * pad;
+    let screen = ctx.screen_rect();
+    let mut r = Rect::from_min_size(pos2(at.x - size.x / 2.0, at.y - 6.0 - size.y), size);
+    let dx = (screen.left() + 4.0 - r.left()).max(0.0) - (r.right() - screen.right() + 4.0).max(0.0);
+    r = r.translate(vec2(dx, 0.0));
+    if r.top() < screen.top() + 4.0 {
+        r = r.translate(vec2(0.0, size.y + 12.0));
+    }
+    painter.rect(
+        r,
+        CornerRadius::same(6),
+        POPUP,
+        egui::Stroke::new(1.0_f32, POPUP_BORDER),
+        egui::StrokeKind::Inside,
+    );
+    painter.galley(r.min + pad, galley, TEXT);
 }
 
 const ICON_MUTED: Color32 = Color32::from_rgb(0x82, 0x82, 0x82);
@@ -528,6 +628,39 @@ mod tests {
         assert_eq!(on_paste(&mut t, true, false), Some(Pasted::Secrets(2)));
         let mut t = "hello world".to_owned();
         assert_eq!(on_paste(&mut t, true, false), None);
+    }
+
+    #[test]
+    fn one_pill_at_a_time_when_secrets_are_stacked() {
+        // Secret 0 on the upper line, secret 1 right below it; the lower
+        // one's pill covers the upper block.
+        let upper = Rect::from_min_size(pos2(100.0, 100.0), vec2(50.0, 18.0));
+        let lower = upper.translate(vec2(0.0, 24.0));
+        let pill_of =
+            |b: Rect| Rect::from_min_size(pos2(b.left() - 2.0, b.top() - 2.0 - 4.0 - 24.0), vec2(42.0, 24.0));
+        let slots = vec![
+            Some(Slot {
+                blocks: vec![upper],
+                pill: pill_of(upper),
+            }),
+            Some(Slot {
+                blocks: vec![lower],
+                pill: pill_of(lower),
+            }),
+        ];
+        let on_upper = upper.center();
+        // Pointer on the upper block, nothing active before: the upper one.
+        assert_eq!(active_secret(&slots, None, Some(on_upper)), Some(0));
+        // The lower pill is showing and the pointer moved onto it (it sits
+        // over the upper block): the lower one keeps it.
+        let on_lower_pill = pill_of(lower).center();
+        assert!(upper.expand(2.0).contains(on_lower_pill));
+        assert_eq!(active_secret(&slots, Some(1), Some(on_lower_pill)), Some(1));
+        // Off its pill, onto the upper block: the upper one takes over.
+        let upper_right = pos2(upper.right() - 2.0, upper.center().y);
+        assert_eq!(active_secret(&slots, Some(1), Some(upper_right)), Some(0));
+        // Away from both: none.
+        assert_eq!(active_secret(&slots, Some(0), Some(pos2(400.0, 400.0))), None);
     }
 
     #[test]

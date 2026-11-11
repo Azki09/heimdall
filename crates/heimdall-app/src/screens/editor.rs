@@ -99,6 +99,11 @@ pub struct EditorState {
     paste: Option<PendingPaste>,
     /// The message after masking (with Undo), bottom right.
     toast: Option<Toast>,
+    /// "Copied · clears in N s" after copying a secret: where, until when
+    /// (egui time), and the seconds.
+    copied: Option<(Pos2, f64, u32)>,
+    /// Tabs scrolled out of the tab bar (all or in part); `⌄` lists them.
+    hidden_tabs: Vec<Uuid>,
 }
 
 /// The tab bar's and status bar's controls, so F6 can move the focus
@@ -420,24 +425,26 @@ pub fn ui(ctx: &egui::Context, s: &mut Session, st: &mut EditorState, last_input
         let right_w = 200.0;
         let bar = ui.max_rect();
         let avail = (bar.width() - right_w).max(120.0);
-        // Tabs that don't fit scroll. The `⌄` button lists them all, with
-        // export, import and backup underneath (DESIGN §10.7, §10.9); it
-        // sits right after `+`, or at the end of the strip once it is full.
+        // Tabs that don't fit scroll. `+` comes right after the last tab,
+        // or stays at the end of the strip once it is full, and `⌄` after
+        // it: the tabs that don't fit, then export, import and backup
+        // (DESIGN §10.1, §10.9).
         let n = s.vault.content.notes.len().max(1) as f32;
         let tabs_rect = Rect::from_min_size(bar.min, vec2(avail - 36.0, chrome::TITLE_BAR_H));
         let tab_w = ((tabs_rect.width() - 32.0 - 4.0) / n - 4.0).clamp(TAB_MIN_W, TAB_MAX_W);
-        let used = n * (tab_w + 4.0) + 32.0;
-        tab_menu_button(ui, st, bar.left() + used.min(tabs_rect.width()) + 2.0);
+        let strip_w = (tabs_rect.width() - 32.0).max(0.0);
+        let shown_w = (n * (tab_w + 4.0)).min(strip_w);
+        let strip = Rect::from_min_size(bar.min, vec2(strip_w, chrome::TITLE_BAR_H));
         let mut tabs_ui = ui.new_child(
             egui::UiBuilder::new()
-                .max_rect(tabs_rect)
+                .max_rect(strip)
                 .layout(egui::Layout::left_to_right(egui::Align::Min)),
         );
-        tabs_ui.set_clip_rect(tabs_rect.intersect(ui.clip_rect()));
+        tabs_ui.set_clip_rect(strip.intersect(ui.clip_rect()));
         egui::ScrollArea::horizontal()
             .id_salt("tabs_scroll")
             .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden)
-            .max_width(tabs_rect.width())
+            .max_width(strip_w)
             .max_height(chrome::TITLE_BAR_H)
             .show(&mut tabs_ui, |ui| {
                 ui.horizontal_top(|ui| {
@@ -445,6 +452,12 @@ pub fn ui(ctx: &egui::Context, s: &mut Session, st: &mut EditorState, last_input
                     tabs(ui, s, st, tabs_rect.width());
                 });
             });
+        let plus = Rect::from_min_size(
+            pos2(bar.left() + shown_w, bar.top()),
+            vec2(32.0, chrome::TITLE_BAR_H),
+        );
+        new_tab_button(ui, s, st, plus);
+        tab_menu_button(ui, st, plus.right() + 2.0);
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             ui.add_space(8.0);
             if chrome_button(ui, "Lock", true)
@@ -511,6 +524,15 @@ pub fn ui(ctx: &egui::Context, s: &mut Session, st: &mut EditorState, last_input
         }
     }
     toast(ctx, s, st);
+    if let Some((at, until, secs)) = st.copied {
+        let now = ctx.input(|i| i.time);
+        if now < until {
+            secrets::copied_note(ctx, at, secs);
+            ctx.request_repaint_after(std::time::Duration::from_secs_f64(until - now));
+        } else {
+            st.copied = None;
+        }
+    }
     if let Some(a) = tab_menu(ctx, s, st) {
         action = Some(a);
     }
@@ -881,6 +903,8 @@ fn tabs(ui: &mut Ui, s: &mut Session, st: &mut EditorState, avail: f32) {
     let mut commit_rename = false;
     st.zones.tabs.clear();
     st.zones.active_tab = None;
+    st.hidden_tabs.clear();
+    let visible = ui.clip_rect();
 
     for note in &s.vault.content.notes {
         let id = note.id;
@@ -944,6 +968,9 @@ fn tabs(ui: &mut Ui, s: &mut Session, st: &mut EditorState, avail: f32) {
             st.zones.active_tab = Some(resp.id);
         }
         let tab = Rect::from_min_max(pos2(outer.left(), outer.bottom() - TAB_H), outer.max);
+        if outer.left() < visible.left() - 1.0 || outer.right() > visible.right() + 1.0 {
+            st.hidden_tabs.push(id);
+        }
         let hovered = resp.hovered();
         let painter = ui.painter();
         if is_active {
@@ -1007,25 +1034,6 @@ fn tabs(ui: &mut Ui, s: &mut Session, st: &mut EditorState, avail: f32) {
         rects.push((id, tab));
     }
 
-    // New tab button.
-    let (plus, plus_resp) = ui.allocate_exact_size(vec2(32.0, chrome::TITLE_BAR_H), Sense::click());
-    let plus_box = Rect::from_center_size(
-        pos2(plus.center().x, plus.bottom() - TAB_H / 2.0),
-        vec2(32.0, 32.0),
-    );
-    if plus_resp.hovered() {
-        ui.painter()
-            .rect_filled(plus_box, CornerRadius::same(6), NAV_ACTIVE);
-    }
-    widgets::icon_plus(
-        ui.painter(),
-        plus_box.center(),
-        12.0,
-        if plus_resp.hovered() { TEXT } else { TEXT_MUTED },
-    );
-    st.zones.tabs.push(plus_resp.id);
-    let plus_resp = plus_resp.on_hover_text("New tab (Ctrl+T)");
-
     let content = &mut s.vault.content;
     let now = heimdall_core::content::now();
     let mut changed_note = None;
@@ -1055,15 +1063,6 @@ fn tabs(ui: &mut Ui, s: &mut Session, st: &mut EditorState, avail: f32) {
         st.focus_editor = true;
         changed = true;
     }
-    if plus_resp.clicked() {
-        content.new_note(now);
-        if content.editor.code_tip {
-            st.tip = Some(Tip { left: TIP_SECONDS });
-        }
-        st.focus_editor = true;
-        changed = true;
-    }
-
     // Drag to reorder: swap with the tab under the pointer.
     if let Some(dragged) = st.dragging {
         if !ui.input(|i| i.pointer.primary_down()) {
@@ -1084,6 +1083,35 @@ fn tabs(ui: &mut Ui, s: &mut Session, st: &mut EditorState, avail: f32) {
 
     if changed || changed_note.is_some() {
         s.touch(changed_note);
+    }
+}
+
+/// The `+` after the tabs; it never scrolls out of view.
+fn new_tab_button(ui: &mut Ui, s: &mut Session, st: &mut EditorState, plus: Rect) {
+    let resp = ui.interact(plus, egui::Id::new("new_tab"), Sense::click());
+    let plus_box = Rect::from_center_size(
+        pos2(plus.center().x, plus.bottom() - TAB_H / 2.0),
+        vec2(32.0, 32.0),
+    );
+    if resp.hovered() {
+        ui.painter()
+            .rect_filled(plus_box, CornerRadius::same(6), NAV_ACTIVE);
+    }
+    widgets::icon_plus(
+        ui.painter(),
+        plus_box.center(),
+        12.0,
+        if resp.hovered() { TEXT } else { TEXT_MUTED },
+    );
+    st.zones.tabs.push(resp.id);
+    if resp.on_hover_text("New tab (Ctrl+T)").clicked() {
+        let content = &mut s.vault.content;
+        content.new_note(heimdall_core::content::now());
+        if content.editor.code_tip {
+            st.tip = Some(Tip { left: TIP_SECONDS });
+        }
+        st.focus_editor = true;
+        s.touch(None);
     }
 }
 
@@ -1148,10 +1176,10 @@ fn text_area(ui: &mut Ui, s: &mut Session, st: &mut EditorState) {
     if let Some(next) = st.reveals.until.iter().map(|(_, t)| *t).reduce(f64::min) {
         ctx.request_repaint_after(std::time::Duration::from_secs_f64((next - now).max(0.0)));
     }
-    // Reveal all shows values in the text; one secret's Reveal shows it in
-    // a bubble, so the text (and the icon under the pointer) stays put.
-    let (all_shown, popped) = st.reveals.shown();
-    let is_revealed = |_: usize| all_shown;
+    // A revealed value shows in the text, inside its block; Reveal all
+    // shows them all (DESIGN §11.1).
+    let (all_shown, one_shown) = st.reveals.shown();
+    let is_revealed = |i: usize| all_shown || one_shown.contains(&i);
 
     if std::mem::take(&mut st.focus_editor) {
         if st.restore_cursor {
@@ -1515,9 +1543,8 @@ fn text_area(ui: &mut Ui, s: &mut Session, st: &mut EditorState) {
 
     // Reveal and Copy on each secret. Paranoid reveals only while held.
     let hold = security.profile == Profile::Paranoid;
-    let popped: Vec<usize> = if all_shown { Vec::new() } else { popped };
-    screen.bubbles(ui, &note.body, &items, &popped);
-    for (i, event) in screen.icons(ui, id, &items, &popped, hold) {
+    let one_shown: Vec<usize> = if all_shown { Vec::new() } else { one_shown.clone() };
+    for (i, event) in screen.icons(ui, id, &items, &one_shown, hold) {
         // The click took focus from the text; give it back.
         st.focus_editor = true;
         match event {
@@ -1526,7 +1553,10 @@ fn text_area(ui: &mut Ui, s: &mut Session, st: &mut EditorState) {
                 ctx.request_repaint();
             }
             IconEvent::Reveal => st.reveals.toggle(i, now + secrets::REVEAL_SECONDS),
-            IconEvent::Copy => copy_secret(&ctx, &note.body, &items[i], &security),
+            IconEvent::Copy(at) => {
+                let secs = copy_secret(&ctx, &note.body, &items[i], &security);
+                st.copied = Some((at, now + COPIED_SECONDS, secs));
+            }
             IconEvent::Menu(pos) => {
                 st.spell_menu = None;
                 st.secret_menu = Some(SecretMenu {
@@ -1787,14 +1817,17 @@ fn delete_secret(ctx: &egui::Context, id: egui::Id, note: &mut Note, items: &[se
 }
 
 /// The value only, with the secret clipboard timer (DESIGN §11.2).
-fn copy_secret(ctx: &egui::Context, text: &str, item: &secrets::Item, security: &SecuritySettings) {
+/// Copies a secret's value; returns after how many seconds the clipboard
+/// is cleared.
+fn copy_secret(ctx: &egui::Context, text: &str, item: &secrets::Item, security: &SecuritySettings) -> u32 {
     let value = &text[secret::value(&item.bytes)];
-    crate::support::copy_with_timer(
-        ctx,
-        value,
-        security.secret_clear_s.min(security.clipboard_clear_s),
-    );
+    let secs = security.secret_clear_s.min(security.clipboard_clear_s);
+    crate::support::copy_with_timer(ctx, value, secs);
+    secs
 }
+
+/// How long "Copied · clears in N s" stays.
+const COPIED_SECONDS: f64 = 1.5;
 
 const MATCH: egui::Color32 = egui::Color32::from_rgb(0x33, 0x33, 0x33);
 const MATCH_CURRENT: egui::Color32 = egui::Color32::from_rgb(0x50, 0x50, 0x50);
@@ -2889,22 +2922,34 @@ fn tab_menu(ctx: &egui::Context, s: &mut Session, st: &mut EditorState) -> Optio
                 ui.set_width(W);
                 ui.spacing_mut().item_spacing.y = 0.0;
                 ui.add_space(6.0);
-                egui::ScrollArea::vertical()
-                    .max_height(max_h)
-                    .auto_shrink([false, true])
-                    .show(ui, |ui| {
-                        ui.spacing_mut().item_spacing.y = 0.0;
-                        for note in &s.vault.content.notes {
-                            let dirty = s.dirty_notes.contains(&note.id);
-                            let selected = Some(note.id) == active;
-                            if tab_row(ui, &tab_title(note), note.code.is_some(), dirty, selected).clicked() {
-                                chosen = Some(note.id);
+                // Only the tabs that don't fit in the tab bar.
+                let hidden: Vec<_> = s
+                    .vault
+                    .content
+                    .notes
+                    .iter()
+                    .filter(|n| st.hidden_tabs.contains(&n.id))
+                    .collect();
+                if !hidden.is_empty() {
+                    egui::ScrollArea::vertical()
+                        .max_height(max_h)
+                        .auto_shrink([false, true])
+                        .show(ui, |ui| {
+                            ui.spacing_mut().item_spacing.y = 0.0;
+                            for note in hidden {
+                                let dirty = s.dirty_notes.contains(&note.id);
+                                let selected = Some(note.id) == active;
+                                if tab_row(ui, &tab_title(note), note.code.is_some(), dirty, selected)
+                                    .clicked()
+                                {
+                                    chosen = Some(note.id);
+                                }
                             }
-                        }
-                    });
-                ui.add_space(6.0);
-                menu_divider(ui, W);
-                ui.add_space(6.0);
+                        });
+                    ui.add_space(6.0);
+                    menu_divider(ui, W);
+                    ui.add_space(6.0);
+                }
                 for (text, a) in file_actions() {
                     if menu_row(ui, W, text, None, false).clicked() {
                         action = Some(a);
@@ -3172,7 +3217,11 @@ fn find_all_panel(ctx: &egui::Context, s: &mut Session, st: &mut EditorState, ri
     let mut close = ctx.input_mut(|i| i.consume_key(Modifiers::NONE, Key::Escape));
     let mut chosen: Option<(Uuid, Match)> = None;
     let field_id = egui::Id::new("find_all_query");
-    let max_h = (ctx.screen_rect().height() - chrome::TITLE_BAR_H - 170.0).clamp(120.0, 520.0);
+    // The results list: at least half the window tall, and down to near
+    // the bottom when there are many.
+    let screen_h = ctx.screen_rect().height();
+    let max_h = (screen_h - chrome::TITLE_BAR_H - 150.0).max(120.0);
+    let min_h = (screen_h * 0.5).min(max_h);
     let area = egui::Area::new(egui::Id::new("find_all"))
         .order(egui::Order::Foreground)
         .anchor(Align2::RIGHT_TOP, vec2(-right, chrome::TITLE_BAR_H + 10.0))
@@ -3223,6 +3272,7 @@ fn find_all_panel(ctx: &egui::Context, s: &mut Session, st: &mut EditorState, ri
                     .max_height(max_h)
                     .auto_shrink([false, true])
                     .show(ui, |ui| {
+                        ui.set_min_height(min_h);
                         ui.spacing_mut().item_spacing.y = 0.0;
                         ui.add_space(6.0);
                         for r in &fa.results {
@@ -3640,7 +3690,8 @@ fn secret_menu(ctx: &egui::Context, s: &mut Session, st: &mut EditorState) {
         }
         (Some(MenuChoice::Copy), Some(item)) => {
             let security = s.vault.content.security.clone();
-            copy_secret(ctx, &note.body, &item, &security);
+            let secs = copy_secret(ctx, &note.body, &item, &security);
+            st.copied = Some((menu.pos, now + COPIED_SECONDS, secs));
         }
         (Some(MenuChoice::EditSecret), Some(_)) => {
             st.secret_edit = Some(SecretEdit {

@@ -1,5 +1,5 @@
 //! Custom window chrome: the window has no system title bar, so we draw our
-//! own (bridge mark, title or tabs, window buttons) and handle dragging and
+//! own (logo mark, title or tabs, window buttons) and handle dragging and
 //! edge resizing ourselves, like Windows 11 Notepad.
 
 use eframe::egui::{self, pos2, vec2, CursorIcon, Rect, ResizeDirection, Sense, Stroke, Ui, ViewportCommand};
@@ -37,12 +37,7 @@ pub fn title_bar(ctx: &egui::Context, content: impl FnOnce(&mut Ui)) {
                 pos2(bar.right() - buttons_w, bar.bottom()),
             );
 
-            widgets::icon_bridge(
-                ui.painter(),
-                pos2(content_rect.left() + 8.0, bar.center().y),
-                16.0,
-                ICON,
-            );
+            widgets::logo_mark(ui, pos2(content_rect.left() + 8.0, bar.center().y), 18.0, ICON);
             let inner = Rect::from_min_max(pos2(content_rect.left() + 26.0, bar.top()), content_rect.max);
             let mut child = ui.new_child(
                 egui::UiBuilder::new()

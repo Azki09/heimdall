@@ -429,7 +429,7 @@ El modelo es el **Bloc de notas de Windows 11**: cada nota es una pestaña. Quie
 | Modo código | Ctrl+Shift+M | Activa o desactiva el modo código **solo en la pestaña actual** (§10.6) |
 | Ajuste de línea | Alt+Z | Activa o desactiva el ajuste de línea **solo en la pestaña actual** |
 | Menú del texto | Clic derecho / Shift+F10 / tecla Menú | *Cut*, *Copy*, *Paste*, *Select all* en cualquier parte del texto, más *Mark as secret* sobre una selección y *Reveal all* en Basic. Sobre un secreto o una palabra mal escrita se abre su propio menú (§11.1, §10.8). Con el teclado se abre en el cursor (§10.10) |
-| Menú ⌄ de pestañas | Ctrl+Shift+E / botón `⌄` | Todas las pestañas, exportar, importar y copia de respaldo (§10.9) |
+| Menú ⌄ de pestañas | Ctrl+Shift+E / botón `⌄` | Las pestañas que no caben, exportar, importar y copia de respaldo (§10.9) |
 | Cambiar de zona | F6 / Shift+F6 | Barra de pestañas → texto → barra de estado (§10.10) |
 
 Todos los atajos aparecen en *Settings → Shortcuts*.
@@ -442,7 +442,7 @@ Todos los atajos aparecen en *Settings → Shortcuts*.
 - **Indicador de cambios:** un punto `•` en la pestaña con cambios sin guardar, igual que en el Bloc de notas.
 - **Restaurar sesión:** al abrir la vault, las pestañas aparecen en el mismo orden, con la misma pestaña activa y el cursor donde estaba. Todo eso vive dentro del contenido cifrado.
 - **Ancho de las pestañas:** todas miden lo mismo, 200 px si caben; con más pestañas se achican por igual hasta 96 px. El título se corta con "…" según el ancho, y el título completo aparece al pasar el ratón.
-- **Muchas pestañas:** si no caben, se desplazan horizontalmente. El menú `⌄` (siempre visible desde la v1.0) tiene la lista completa. La pestaña activa siempre se desplaza hasta quedar a la vista.
+- **Muchas pestañas:** si no caben, se desplazan horizontalmente. El botón `+` va justo después de la última pestaña y, cuando ya no caben, se queda fijo al final de la tira, junto a `⌄`: nunca se desplaza fuera de la vista (v1.2.2). El menú `⌄` lista las pestañas que no se ven (también las cortadas a la mitad). La pestaña activa siempre se desplaza hasta quedar a la vista.
 - **Clic derecho en una pestaña:** *Rename*, *Export this note…* (§10.9) y *Close tab*.
 
 ### 10.2 Autoguardado (cifrado)
@@ -539,9 +539,9 @@ No hay plegado de código (*folding*).
 - Escape cierra la barra y devuelve el cursor al texto. Funciona igual en notas normales y en modo código.
 - Búsqueda literal (sin expresiones regulares); sin *Match case*, cada carácter se pasa a minúscula uno a uno, así que las posiciones no se desplazan. Como máximo 10 000 coincidencias por nota (el contador muestra "+").
 
-**En todas las notas (Ctrl+Shift+F).** Un panel en el mismo lugar, más ancho: campo, `Aa`, cerrar y un resumen ("7 results in 3 notes"). Los resultados se agrupan por nota (título y número de coincidencias), con una fila por coincidencia: número de línea y un fragmento de la línea con la coincidencia resaltada. Como máximo 20 filas por nota ("N more in this note"). Un clic abre la nota, selecciona la coincidencia y deja abierta la barra de Ctrl+F con la misma búsqueda. Solo busca en las pestañas abiertas; **la papelera no**.
+**En todas las notas (Ctrl+Shift+F).** Un panel en el mismo lugar, más ancho: campo, `Aa`, cerrar y un resumen ("7 results in 3 notes"). Los resultados se agrupan por nota (título y número de coincidencias), con una fila por coincidencia: número de línea y un fragmento de la línea con la coincidencia resaltada. Como máximo 20 filas por nota ("N more in this note"). La lista de resultados mide al menos la mitad del alto de la ventana y, con muchos, llega casi hasta abajo (v1.2.2). Un clic abre la nota, selecciona la coincidencia y deja abierta la barra de Ctrl+F con la misma búsqueda. Solo busca en las pestañas abiertas; **la papelera no**.
 
-**Menú de pestañas.** Un botón `⌄` a la derecha de las pestañas lista todas (ícono `</>`, punto de cambios sin guardar, la activa marcada). Un clic cambia de pestaña. Hasta la v1.0 solo aparecía si las pestañas no cabían; desde la v1.0 está siempre, porque debajo de la lista tiene las acciones de exportar, importar y copia de respaldo (§10.9).
+**Menú de pestañas.** Un botón `⌄` a la derecha de las pestañas lista **las que no caben** en la barra (ícono `</>`, punto de cambios sin guardar, la activa marcada); si caben todas, la lista no aparece. Un clic cambia de pestaña. Está siempre, porque debajo tiene las acciones de exportar, importar y copia de respaldo (§10.9). Hasta la v1.2.1 listaba todas las pestañas.
 
 Lo buscado vive solo en memoria y se borra (zeroize) al cerrar la barra, el panel o la vault.
 
@@ -567,7 +567,9 @@ Diseño cerrado el 2026-11-07 (v1.0). Son cinco acciones:
 | *Import text files…* | Menú `⌄` · *Settings → Vault* | Cada archivo de texto se vuelve una nota |
 | *Save a backup copy…* | Menú `⌄` · *Settings → Vault* | Copia exacta del `.heim` a otro lugar |
 
-**El menú `⌄` se muestra siempre** (antes solo aparecía cuando las pestañas no cabían): arriba la lista de pestañas, debajo una línea y estas cinco acciones. **Clic derecho en una pestaña** abre un menú con *Rename*, *Export this note…* y *Close tab*.
+**El menú `⌄` se muestra siempre** (antes solo aparecía cuando las pestañas no cabían): arriba las pestañas que no caben, debajo una línea y estas cinco acciones.
+
+**Elegir el archivo (v1.2.2).** Cada vez que hay que abrir o guardar un archivo (abrir vault, importar, exportar, copia de respaldo) sale un cuadro con un campo para **pegar o escribir la ruta** y el botón *Browse…*, que abre el diálogo del sistema como antes y usa lo elegido directamente. La ruta pegada se limpia (espacios y las comillas que agrega *Copiar como ruta de acceso* de Windows; `~` es la carpeta de inicio) y se revisa: al abrir, que sea un archivo que existe; al guardar, que la carpeta exista, que no sea una carpeta, y se agrega la extensión si falta. Si el archivo ya existe, pide *Replace* antes de reemplazarlo. Las reglas de siempre siguen (nunca la vault abierta ni su `.bak`); lo que no se puede usar se explica en el mismo cuadro. En el asistente de creación, *Location* es un campo editable con *Browse…* al lado; pegar la ruta completa de un `.heim` llena también el nombre. **Clic derecho en una pestaña** abre un menú con *Rename*, *Export this note…* y *Close tab*.
 
 **Pedir la contraseña antes de exportar.** Las dos exportaciones sacan información de la vault, así que piden la contraseña actual primero (el mismo diálogo que *Reveal all*, §11.1). En Hardened y Paranoid siempre. En Basic se puede apagar con *Ask for password before exporting* (*Settings → Vault*, encendido por defecto); apagado, el perfil se muestra como "· Custom". La copia de respaldo y las importaciones no la piden: no sacan nada que no esté ya cifrado.
 
@@ -676,13 +678,13 @@ Diseño cerrado el 2026-10-30 (v0.4).
   - Cierra el primer `*}` después de `{*`.
   - Si falta el cierre, todo queda como texto normal.
   - `\{*` escribe el delimitador tal cual: se muestra `{*`, sin la barra y sin enmascarar.
-- **Cómo se ve:** un **rectángulo liso** de otro tono (sin puntos), siempre del mismo ancho, sin importar el largo. A su **derecha, fuera del rectángulo**, dos íconos de línea monocromos: **Reveal** y **Copy**, que **solo se ven con el cursor encima** del secreto (su espacio queda reservado para que el texto no se mueva). El ancho no revela la longitud. (En títulos, búsqueda y minimapa sigue mostrándose como `••••••`.)
+- **Cómo se ve:** un **rectángulo liso** de otro tono (sin puntos), siempre del mismo ancho, sin importar el largo. El ancho no revela la longitud. Con el cursor encima aparecen **Reveal** y **Copy** (íconos de línea monocromos) en una **pastilla flotante encima del rectángulo** (debajo si está en la primera línea visible). La pastilla no ocupa lugar en el texto: no queda ningún hueco después del secreto y nada se mueve al pasar el cursor (v1.2.2; antes los íconos iban a la derecha con su espacio reservado). **Una sola pastilla a la vez:** como puede tapar el secreto de la línea de arriba, la que está a la vista se queda mientras el cursor esté sobre ella, sobre su secreto o en el espacio entre ambos; si no, la toma el secreto bajo el cursor. (En títulos, búsqueda y minimapa sigue mostrándose como `••••••`.)
 - **Clic derecho** sobre el rectángulo o sobre sus íconos abre el menú del secreto.
 - **Se comporta como un bloque:** el cursor lo salta, Backspace (al final) y Supr (al inicio) lo borran completo, y una selección que lo toca a medias se extiende para cubrirlo entero.
 - **Editar:** clic derecho → *Edit secret* abre un campo enmascarado con el valor. Lo que se pega en ese campo se toma tal cual. También se puede editar mientras está revelado.
-- **Reveal:** muestra el valor 5 s en una **burbuja flotante** encima del secreto (debajo si está en la primera línea visible). El texto no se reacomoda, así que los íconos no se mueven bajo el cursor; un segundo clic lo oculta. En **Paranoid** solo mientras se mantiene presionado el ícono. Todo vuelve a enmascararse cuando la ventana pierde el foco o al cambiar de pestaña.
+- **Reveal:** muestra el valor 5 s **dentro del rectángulo**, que crece lo necesario; el texto de después se recorre y vuelve a su lugar al ocultarse. La pastilla se queda anclada al inicio del rectángulo, así que el ojo no se mueve bajo el cursor. Se oculta con otro clic en el ojo, con **un clic en el valor** o sola a los 5 s (v1.2.2; antes el valor salía en una burbuja flotante). En **Paranoid** solo mientras se mantiene presionado el ícono. Todo vuelve a enmascararse cuando la ventana pierde el foco o al cambiar de pestaña.
 - **Reveal all** (clic derecho): solo en **Basic** y pide la contraseña. Es el único caso en que los valores se muestran dentro del texto. Muestra los secretos de la nota hasta que la ventana pierde el foco o se cambia de pestaña.
-- **Copy:** copia solo el valor, sin delimitadores.
+- **Copy:** copia solo el valor, sin delimitadores. Un aviso pequeño encima del ícono dice **"Copied · clears in N s"** durante 1,5 s, con el tiempo en que se borra el portapapeles según el perfil (v1.2.2).
 - **Búsqueda:** Ctrl+F y Ctrl+Shift+F no buscan dentro de los secretos (si lo hicieran, se podría adivinar un secreto letra por letra) y los resultados los muestran enmascarados.
 - **Corrector ortográfico:** ignora los secretos.
 - **Títulos de pestaña:** si el título contiene un secreto, se muestra enmascarado. Lo mismo en el minimapa del modo código.
@@ -787,7 +789,10 @@ Si una señal de D-Bus no llega (un contenedor sin logind, un escritorio mínimo
 | **v1.1** | YubiKey/FIDO2 |
 | **v1.0** | Formato congelado (§5.6), **menú contextual general** (clic derecho con Cut / Copy / Paste / Select all en cualquier parte del texto), copia de respaldo manual, exportar e importar, cifrado y en texto plano (§10.9) |
 | **v1.2** | Linux (§13.1) |
-| **Futuro** | Menú lateral, generador de contraseñas, etiquetas y notas fijadas; modo terminal (`heimdall archivo.txt`, como nano, con el archivo cifrado); YubiKey; Shamir 2-de-3; macOS |
+| **Siguiente** | Modo terminal sencillo, solo Linux (§17). Una vez hecho, la terminal no recibe más funciones |
+| **v1.3** | Generador de contraseñas: inserta la contraseña directo como secreto `{*…*}`, sin pasar por el portapapeles |
+| **v2.0 — App completa** | Windows y Linux: menú lateral (el generador se muda ahí), etiquetas, notas fijadas, quizás historial de notas. Cambio de formato del contenido: decidir antes cómo se comporta una bóveda 2.0 abierta en 1.x |
+| **Futuro** | YubiKey; Shamir 2-de-3; macOS; modo terminal en Windows |
 
 ### 14.1 Estado (2026-10-29)
 
@@ -904,7 +909,8 @@ Decisiones tomadas al implementar el modo código:
 - **Idioma de la interfaz: inglés.** Todos los textos de la app (menús, botones, mensajes, hoja de recuperación) van en inglés. Este documento sigue en español.
 - **Sin emojis** en la interfaz. Solo íconos de línea monocromos, del mismo color que el texto. El estado se comunica con texto y color, nunca con emojis.
 - **Tema: solo oscuro.**
-- **Estilo: minimalista.** Grises, sin acentos llamativos. La temática de Heimdall se limita al logo (un puente: dos pilares y un arco). Nada decorativo.
+- **Estilo: minimalista.** Grises, sin acentos llamativos. La temática de Heimdall se limita al logo. Nada decorativo.
+- **Logo de la barra de título (v1.2.2):** la runa con dos arcos de `crates/heimdall-app/assets/icon/logo_mini.svg`, en `#9A9A9A`, 18 px. `gen_logo_mark.py` lo convierte en polígonos (`src/logo_mark.rs`) y la app lo rellena al tamaño exacto en píxeles de la pantalla, así se ve nítido con cualquier escala. Antes era un puente (dos pilares y un arco). El ícono del ejecutable, la barra de tareas y el menú de Linux no cambia.
 - **Pantalla de desbloqueo:** logotipo en arte ASCII (decorativo, gris apagado) en lugar del texto "Heimdall"; debajo, el nombre del archivo de la vault. Frase al pie: *"No signal. No trace."*
 
 ### 15.2 Paleta
@@ -963,3 +969,68 @@ Modales sobre la pantalla de origen oscurecida. Mismo patrón en todos: título 
 5. ~~YubiKey~~ **Resuelto (2026-10-28):** fuera del MVP; planeada para la **versión 1.1**.
 6. ~~Diseño visual~~ **Resuelto (2026-10-28):** completo, 21 mockups (§15.4, `docs/mockups/`).
 7. ~~Opción "Don't remember recent vaults"~~ **Resuelto (2026-10-28):** ajuste *Remember recent vaults* en Settings → Security; Sí en Basic, No en Hardened/Paranoid (§6, §6.1).
+
+---
+
+## 17. Modo terminal (diseño, sin implementar)
+
+Decidido con el usuario el 2026-11-10. Mockups:
+https://claude.ai/artifact/LNxnNe8mAEQ8RqiCbXKsMw
+
+**Alcance.** La app gráfica (Windows y Linux) es el producto completo y es
+donde llegan las funciones nuevas. El modo terminal es a propósito sencillo:
+abrir, editar, listar y borrar notas de la bóveda normal. No tiene ajustes,
+perfiles, accesos, exportar ni generador. Es lo siguiente después de las
+correcciones de la 1.2.x, solo en Linux (en Windows haría falta un segundo
+ejecutable de consola). Una vez hecho, todo lo nuevo llega a la app gráfica.
+
+### 17.1 Funcionamiento
+
+- `heimdall hola.txt` abre o crea la nota titulada `hola.txt` **dentro de la
+  bóveda del usuario**; no es una bóveda por archivo. La nota aparece también
+  en la app gráfica.
+- Pide la contraseña de la bóveda como `sudo`. Con presencia (USB) exige la
+  llave igual que la app.
+- **Bloqueo exclusivo:** si la bóveda está abierta en la app gráfica, la
+  terminal se niega con un mensaje. (Hablar con la app abierta por IPC queda
+  para después.)
+- **Sin caché de la llave** (decidido 2026-11-10): cada comando pide la
+  contraseña. Un agente que guarde la llave entre comandos sería la parte más
+  delicada y va contra "sencillo". En `heimdall` sin argumentos la sesión
+  sigue abierta mientras se eligen y editan varias notas, y se bloquea con
+  el tiempo de inactividad del perfil. Si el uso real lo pide, se reconsidera
+  un caché por perfil (Basic ~5 min, Hardened corto, Paranoid nunca).
+- **Nunca se escribe texto plano a disco**: ni archivos temporales ni swap
+  (mlock, igual que la app, §13.1).
+
+### 17.2 Comandos
+
+| Comando | Qué hace |
+|---|---|
+| `heimdall` | Banner, datos de la bóveda, contraseña, lista numerada `[1] título  editada fecha` y `:: Open note [1-6, n = new, Enter = quit] :` |
+| `heimdall <título>` | Abre o crea esa nota en el editor. Si hay títulos repetidos, lista para elegir |
+| `heimdall ls [filtro]` | Solo los títulos, uno por línea, sin banner (sirve en scripts) |
+| `heimdall rm <título>` | Manda la nota a la papelera, **siempre preguntando antes**: `:: Move "x" to trash? [y/N] :`. Por defecto No |
+| `heimdall --help` | Banner y ayuda |
+
+Los mensajes de error y avisos empiezan con `[heimdall]`.
+
+### 17.3 Aspecto
+
+**Sin colores**, solo caracteres del teclado.
+
+- **Salida normal** (estilo ffuf): banner = el logo ASCII exacto de la
+  pantalla de inicio (`widgets.rs`, `LOGO`, no el logo de runas), luego
+  `v<versión> :: encrypted notes`, una línea de `_` y líneas `:: Clave : valor`.
+  El banner sale **solo** con `heimdall` y `heimdall --help`. Si la terminal
+  mide menos de 80 columnas (el logo mide 79), en su lugar una línea:
+  `HEIMDALL v<versión> :: encrypted notes`.
+- **Editor** a pantalla completa, como nano. Separadores hechos de `-`.
+  - Arriba: bóveda, título de la nota y `Modified` si hay cambios.
+  - Abajo, **siempre visibles**: `^S Save  ^Q Quit  ^F Find  ^R Reveal  ^G Help`
+    (notación `^`, como nano).
+  - **Línea de estado siempre visible:** `Ln/Col`. La cuenta regresiva del
+    bloqueo aparece **solo en el último minuto**.
+  - **Secretos** `{*…*}`: se muestran como `[secret]`, de ancho fijo para no
+    revelar la longitud. `^R` muestra el texto `{*…*}` en su lugar.
+

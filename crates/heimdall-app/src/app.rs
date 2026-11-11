@@ -10,6 +10,7 @@ use heimdall_core::content::{LineEnding, Profile, SecuritySettings};
 use heimdall_core::Vault;
 use zeroize::Zeroize;
 
+use crate::path_prompt::{self, PathPrompt};
 use crate::screens::editor::EditorState;
 use crate::screens::settings::Settings;
 use crate::screens::transfer::{self, Transfer};
@@ -66,6 +67,14 @@ pub enum LockReason {
     Suspended,
 }
 
+/// What a path prompt over the current screen is for.
+enum PromptFor {
+    OpenVault,
+    ImportVault,
+    ImportText,
+    Backup,
+}
+
 enum Screen {
     Welcome(Welcome),
     Unlock(Box<Unlock>),
@@ -86,6 +95,8 @@ pub struct HeimdallApp {
     /// The native window, once known; and what was last applied to it.
     window: Option<isize>,
     capture_excluded: Option<bool>,
+    /// Where to open or save a file, over the current screen (DESIGN §10.9).
+    prompt: Option<(PathPrompt, PromptFor)>,
 }
 
 impl HeimdallApp {
@@ -102,6 +113,7 @@ impl HeimdallApp {
             last_input: Instant::now(),
             window: None,
             capture_excluded: None,
+            prompt: None,
         }
     }
 
@@ -194,13 +206,10 @@ impl HeimdallApp {
         match action {
             Action::Welcome => self.screen = Screen::Welcome(Welcome::new(&self.recent)),
             Action::PickFile => {
-                let picked = rfd::FileDialog::new()
-                    .set_title("Open vault")
-                    .add_filter("Heimdall vault", &["heim"])
-                    .pick_file();
-                if let Some(path) = picked {
-                    self.screen = Screen::Unlock(Box::new(Unlock::new(path, None)));
-                }
+                let start = path_prompt::documents_dir();
+                let prompt = PathPrompt::new("Open vault", "Open", path_prompt::Kind::Open, &start)
+                    .filter("Heimdall vault", &["heim"]);
+                self.prompt = Some((prompt, PromptFor::OpenVault));
             }
             Action::Open(path) => self.screen = Screen::Unlock(Box::new(Unlock::new(path, None))),
             Action::Create => self.screen = Screen::Wizard(Box::new(Wizard::create())),
@@ -224,13 +233,33 @@ impl HeimdallApp {
                 }
             }
             Action::ImportText => {
-                if let Some(s) = self.session.as_mut() {
-                    transfer::import_text_files(s);
+                if let Some(s) = &self.session {
+                    let mut exts = vec!["txt"];
+                    for e in crate::code::all_extensions() {
+                        if !exts.contains(&e) {
+                            exts.push(e);
+                        }
+                    }
+                    let start = vault_dir(s);
+                    let prompt =
+                        PathPrompt::new("Import text files", "Import", path_prompt::Kind::OpenMany, &start)
+                            .filter("Text and code", &exts)
+                            .filter("All files", &["*"]);
+                    self.prompt = Some((prompt, PromptFor::ImportText));
                 }
             }
             Action::Backup => {
-                if let Some(s) = self.session.as_mut() {
-                    transfer::backup(s);
+                if let Some(s) = &self.session {
+                    let date = chrono::Local::now().format("%Y-%m-%d");
+                    let name = format!("{}-backup-{date}.heim", transfer::file_stem(&s.path));
+                    let prompt = PathPrompt::new(
+                        "Save a backup copy",
+                        "Save",
+                        path_prompt::Kind::Save { ext: "heim".into() },
+                        &vault_dir(s).join(name),
+                    )
+                    .filter("Heimdall vault", &["heim"]);
+                    self.prompt = Some((prompt, PromptFor::Backup));
                 }
             }
         }
@@ -238,23 +267,66 @@ impl HeimdallApp {
 
     /// Chooses the vault to import from; never the open one.
     fn import_vault(&mut self) {
-        let Some(s) = self.session.as_mut() else {
+        let Some(s) = self.session.as_ref() else {
             return;
         };
-        let mut dialog = rfd::FileDialog::new()
-            .set_title("Import notes from vault")
-            .add_filter("Heimdall vault", &["heim"]);
-        if let Some(dir) = s.path.parent() {
-            dialog = dialog.set_directory(dir);
-        }
-        let Some(path) = dialog.pick_file() else {
+        let prompt = PathPrompt::new(
+            "Import notes from vault",
+            "Import",
+            path_prompt::Kind::Open,
+            &vault_dir(s),
+        )
+        .filter("Heimdall vault", &["heim"]);
+        self.prompt = Some((prompt, PromptFor::ImportVault));
+    }
+
+    /// Shows the path prompt, if any, and acts on what was chosen. A path
+    /// that can't be used keeps the prompt open with the reason.
+    fn path_prompt(&mut self, ctx: &egui::Context) {
+        let Some((mut prompt, what)) = self.prompt.take() else {
             return;
         };
-        if transfer::same_file(&path, &s.path) {
-            s.notify("That is the vault that is open. Choose another one.", true);
+        let paths = match prompt.ui(ctx) {
+            path_prompt::Outcome::Open => {
+                self.prompt = Some((prompt, what));
+                return;
+            }
+            path_prompt::Outcome::Canceled => return,
+            path_prompt::Outcome::Chosen(paths) => paths,
+        };
+        let Some(first) = paths.first().cloned() else {
             return;
+        };
+        let refused = match what {
+            PromptFor::OpenVault => {
+                self.screen = Screen::Unlock(Box::new(Unlock::new(first, None)));
+                None
+            }
+            PromptFor::ImportVault => match self.session.as_ref() {
+                Some(s) if transfer::same_file(&first, &s.path) => {
+                    Some("That is the vault that is open. Choose another one.".to_owned())
+                }
+                Some(_) => {
+                    self.screen = Screen::Transfer(Box::new(Transfer::import_vault(first)));
+                    None
+                }
+                None => None,
+            },
+            PromptFor::ImportText => {
+                if let Some(s) = self.session.as_mut() {
+                    transfer::import_text_files(s, &paths);
+                }
+                None
+            }
+            PromptFor::Backup => self
+                .session
+                .as_mut()
+                .and_then(|s| transfer::backup(s, &first).err()),
+        };
+        if let Some(reason) = refused {
+            prompt.error = Some(reason);
+            self.prompt = Some((prompt, what));
         }
-        self.screen = Screen::Transfer(Box::new(Transfer::import_vault(path)));
     }
 
     fn opened(&mut self, ctx: &egui::Context, mut vault: Vault, path: PathBuf, usb: Option<UsbKey>) {
@@ -295,6 +367,7 @@ impl HeimdallApp {
             _ => None,
         };
         let path = session.path.clone();
+        self.prompt = None;
         self.session = None; // drops the Vault: MK and note text are zeroized
         self.clipboard.clear_now();
         self.editor = EditorState::default();
@@ -384,6 +457,15 @@ impl HeimdallApp {
 
 /// egui keeps text-edit state (including undo history) in its memory.
 /// Reset it on lock so no note text lingers there.
+/// The open vault's folder, where file prompts start.
+fn vault_dir(s: &Session) -> PathBuf {
+    s.path
+        .parent()
+        .filter(|d| !d.as_os_str().is_empty())
+        .map(PathBuf::from)
+        .unwrap_or_else(path_prompt::documents_dir)
+}
+
 fn wipe_ui_memory(ctx: &egui::Context) {
     ctx.memory_mut(|m| *m = Default::default());
     theme::apply_style(ctx);
@@ -441,6 +523,7 @@ impl eframe::App for HeimdallApp {
         if let Some(action) = action {
             self.apply(ctx, action);
         }
+        self.path_prompt(ctx);
 
         self.handle_copies(ctx);
         self.apply_capture_exclusion();

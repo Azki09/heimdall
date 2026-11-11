@@ -386,24 +386,66 @@ fn scaled(center: Pos2, size: f32, view: f32) -> impl Fn(f32, f32) -> Pos2 {
     move |x, y| pos2(origin.x + x * s, origin.y + y * s)
 }
 
-/// The bridge mark: two pillars and an arch (DESIGN §15.1).
-pub fn icon_bridge(painter: &Painter, center: Pos2, size: f32, color: Color32) {
-    let p = scaled(center, size, 40.0);
-    let stroke = Stroke::new(size * 3.0 / 40.0 * 1.2, color);
-    painter.line_segment([p(7.0, 34.0), p(7.0, 14.0)], stroke);
-    painter.line_segment([p(33.0, 34.0), p(33.0, 14.0)], stroke);
-    painter.line_segment([p(7.0, 25.0), p(33.0, 25.0)], stroke);
-    let arch: Vec<Pos2> = (0..=16)
-        .map(|i| {
-            let t = i as f32 / 16.0;
-            // Cubic Bezier (7,15) (14,6) (26,6) (33,15)
-            let u = 1.0 - t;
-            let x = u * u * u * 7.0 + 3.0 * u * u * t * 14.0 + 3.0 * u * t * t * 26.0 + t * t * t * 33.0;
-            let y = u * u * u * 15.0 + 3.0 * u * u * t * 6.0 + 3.0 * u * t * t * 6.0 + t * t * t * 15.0;
-            p(x, y)
-        })
-        .collect();
-    painter.add(egui::Shape::line(arch, stroke));
+/// The title bar mark (DESIGN §15.1), from `assets/icon/logo_mini.svg`.
+/// Filled at the screen's exact pixel size, so it stays sharp on any
+/// display scale; each size is made once and kept.
+pub fn logo_mark(ui: &Ui, center: Pos2, size: f32, color: Color32) {
+    let ctx = ui.ctx();
+    let px = (size * ctx.pixels_per_point()).round().max(1.0) as usize;
+    let id = egui::Id::new(("logo_mark", px));
+    let texture = ctx
+        .data_mut(|d| d.get_temp::<egui::TextureHandle>(id))
+        .unwrap_or_else(|| {
+            let coverage = rasterize(crate::logo_mark::POLYGONS, px);
+            let pixels = coverage
+                .into_iter()
+                .map(|a| Color32::from_rgba_premultiplied(a, a, a, a))
+                .collect();
+            let image = egui::ColorImage {
+                size: [px, px],
+                pixels,
+            };
+            let handle = ctx.load_texture("logo_mark", image, egui::TextureOptions::LINEAR);
+            ctx.data_mut(|d| d.insert_temp(id, handle.clone()));
+            handle
+        });
+    let rect = Rect::from_center_size(center, vec2(size, size));
+    let uv = Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0));
+    ui.painter().image(texture.id(), rect, uv, color);
+}
+
+/// Coverage (0-255) of an `n`x`n` square by `polygons` (unit square,
+/// even-odd rule), with 4x4 samples per pixel.
+fn rasterize(polygons: &[&[[f32; 2]]], n: usize) -> Vec<u8> {
+    const SUB: usize = 4;
+    let mut hits = vec![0u16; n * n];
+    let mut xs: Vec<f32> = Vec::new();
+    let scale = (n * SUB) as f32;
+    for sy in 0..n * SUB {
+        let y = (sy as f32 + 0.5) / scale;
+        xs.clear();
+        for poly in polygons {
+            for (i, a) in poly.iter().enumerate() {
+                let b = poly[(i + 1) % poly.len()];
+                if (a[1] <= y) != (b[1] <= y) {
+                    xs.push(a[0] + (y - a[1]) * (b[0] - a[0]) / (b[1] - a[1]));
+                }
+            }
+        }
+        xs.sort_by(f32::total_cmp);
+        let row = (sy / SUB) * n;
+        for span in xs.chunks_exact(2) {
+            // Samples sit at the middle of each sub-column.
+            let from = (span[0] * scale - 0.5).ceil().max(0.0) as usize;
+            let to = ((span[1] * scale - 0.5).ceil().max(0.0) as usize).min(n * SUB);
+            for sx in from..to {
+                hits[row + sx / SUB] += 1;
+            }
+        }
+    }
+    hits.into_iter()
+        .map(|h| (h as u32 * 255 / (SUB * SUB) as u32) as u8)
+        .collect()
 }
 
 pub fn icon_close(painter: &Painter, center: Pos2, size: f32, color: Color32) {
@@ -602,4 +644,19 @@ pub fn icon_copy(painter: &Painter, center: Pos2, color: Color32) {
         s,
     ));
     painter.rect_stroke(front, CornerRadius::same(1), s, StrokeKind::Middle);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn logo_mark_fills_the_rune_and_keeps_the_hole() {
+        let n = 64;
+        let px = rasterize(crate::logo_mark::POLYGONS, n);
+        let at = |x: usize, y: usize| px[y * n + x];
+        assert_eq!(at(0, 0), 0, "corner is empty");
+        assert_eq!(at(32, 10), 255, "the vertical stroke is solid");
+        assert_eq!(at(38, 36), 0, "the triangle inside the rune is a hole");
+    }
 }

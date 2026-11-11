@@ -43,6 +43,8 @@ enum Mode {
     Create {
         name: String,
         folder: PathBuf,
+        /// The Location field: a folder typed, pasted or browsed to.
+        location: String,
         profile: Profile,
     },
     /// Opened with the recovery code; `vault` is `None` while a job runs.
@@ -79,13 +81,11 @@ impl Drop for Wizard {
 
 impl Wizard {
     pub fn create() -> Self {
-        let folder = std::env::var_os("USERPROFILE")
-            .map(|p| Path::new(&p).join("Documents"))
-            .filter(|p| p.is_dir())
-            .unwrap_or_else(|| PathBuf::from("."));
+        let folder = crate::path_prompt::documents_dir();
         Self::with_mode(
             Mode::Create {
                 name: "personal".into(),
+                location: folder.display().to_string(),
                 folder,
                 profile: Profile::Basic,
             },
@@ -341,6 +341,9 @@ impl Wizard {
         if name.chars().any(|c| r#"<>:"/\|?*"#.contains(c) || c.is_control()) {
             return Some(r#"A name can't contain < > : " / \ | ? *"#);
         }
+        if folder.as_os_str().is_empty() {
+            return Some("Type or paste the folder for the vault.");
+        }
         if !folder.is_dir() {
             return Some("That folder doesn't exist.");
         }
@@ -493,7 +496,13 @@ impl Wizard {
         );
         ui.add_space(24.0);
         let problem = self.name_problem();
-        let Mode::Create { name, folder, .. } = &mut self.mode else {
+        let Mode::Create {
+            name,
+            folder,
+            location,
+            ..
+        } = &mut self.mode
+        else {
             return;
         };
         widgets::label(ui, "Vault name", 12.0, TEXT_MUTED);
@@ -502,30 +511,42 @@ impl Wizard {
             resp.request_focus();
         }
         ui.add_space(20.0);
+        // The folder can be typed or pasted, or chosen with Browse…
         widgets::label(ui, "Location", 12.0, TEXT_MUTED);
-        let (rect, _) = ui.allocate_exact_size(vec2(460.0, 42.0), Sense::hover());
-        ui.painter().rect_stroke(
-            rect,
-            CornerRadius::same(6),
-            Stroke::new(1.0_f32, BORDER),
-            StrokeKind::Inside,
-        );
-        let shown = display_path(&folder.join(format!("{}.heim", name.trim())));
-        ui.painter().text(
-            pos2(rect.left() + 12.0, rect.center().y),
-            Align2::LEFT_CENTER,
-            shown,
-            mono(13.0),
-            TEXT_BODY,
-        );
-        let change_rect =
-            egui::Rect::from_min_size(pos2(rect.right() - 84.0, rect.top() + 5.0), vec2(78.0, 32.0));
-        let mut child = ui.new_child(egui::UiBuilder::new().max_rect(change_rect));
-        if widgets::button(&mut child, ButtonKind::Quiet, "Change", true, vec2(78.0, 32.0)).clicked() {
-            if let Some(dir) = rfd::FileDialog::new().set_directory(&*folder).pick_folder() {
-                *folder = dir;
+        let before = location.clone();
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = 8.0;
+            widgets::text_field(
+                ui,
+                egui::Id::new("vault_location"),
+                location,
+                460.0 - 104.0,
+                None,
+                "",
+            );
+            if widgets::button(ui, ButtonKind::Secondary, "Browse…", true, vec2(96.0, 42.0)).clicked() {
+                if let Some(dir) = rfd::FileDialog::new().set_directory(&*folder).pick_folder() {
+                    *location = dir.display().to_string();
+                }
+            }
+        });
+        if *location != before || folder.as_os_str().is_empty() {
+            match crate::path_prompt::parse(location) {
+                // A pasted path to a .heim file: its folder, and its name.
+                Some(p) if p.extension().is_some_and(|e| e.eq_ignore_ascii_case("heim")) && !p.is_dir() => {
+                    if let (Some(dir), Some(stem)) = (p.parent(), p.file_stem()) {
+                        *name = stem.to_string_lossy().into_owned();
+                        *folder = dir.to_path_buf();
+                        *location = dir.display().to_string();
+                    }
+                }
+                Some(p) => *folder = p,
+                None => *folder = PathBuf::new(),
             }
         }
+        ui.add_space(6.0);
+        let shown = display_path(&folder.join(format!("{}.heim", name.trim())));
+        widgets::label(ui, &format!("Saved as {shown}"), 12.0, TEXT_MUTED);
         ui.add_space(10.0);
         if let Some(p) = problem {
             if !name.trim().is_empty() {
@@ -805,9 +826,9 @@ const STEP_TODO_TEXT: egui::Color32 = egui::Color32::from_rgb(0x82, 0x82, 0x82);
 
 /// `C:\Users\me\Documents\x.heim` → `Documents\x.heim`.
 fn display_path(p: &Path) -> String {
-    if let Some(home) = std::env::var_os("USERPROFILE") {
-        if let Ok(rel) = p.strip_prefix(Path::new(&home)) {
-            return rel.display().to_string();
+    if let Some(home) = crate::path_prompt::home_dir() {
+        if let Ok(rel) = p.strip_prefix(&home) {
+            return Path::new("~").join(rel).display().to_string();
         }
     }
     p.display().to_string()

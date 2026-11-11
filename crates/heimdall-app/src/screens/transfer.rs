@@ -13,6 +13,7 @@ use zeroize::Zeroize;
 
 use crate::app::Action;
 use crate::chrome;
+use crate::path_prompt::{self, PathPrompt};
 use crate::plain::{self, Secrets};
 use crate::screens::confirm::{Outcome, PasswordCheck};
 use crate::screens::keys::{self, CodeActions, CodeCheck};
@@ -80,54 +81,16 @@ pub fn file_stem(path: &Path) -> String {
         .unwrap_or_else(|| "vault".into())
 }
 
-/// The save dialog may return a name without the extension, or with another
-/// one the user typed; the extension is then added here. Windows only asked
-/// about overwriting the name it returned, so a file that already exists
-/// under the new name is refused instead of being replaced without asking.
-pub fn with_extension(path: PathBuf, ext: &str) -> Result<PathBuf, String> {
-    if path.extension().is_some_and(|e| e.eq_ignore_ascii_case(ext)) {
-        return Ok(path);
-    }
-    let mut s = path.into_os_string();
-    s.push(".");
-    s.push(ext);
-    let path = PathBuf::from(s);
-    if path.exists() {
-        Err(format!(
-            "{} already exists. Choose another name.",
-            file_name(&path)
-        ))
-    } else {
-        Ok(path)
-    }
-}
-
 fn plural(n: usize, word: &str) -> String {
     format!("{n} {word}{}", if n == 1 { "" } else { "s" })
 }
 
 /// "Import text files…" (DESIGN §10.9): each chosen file becomes a new
 /// note. The files themselves are never touched.
-pub fn import_text_files(s: &mut Session) {
-    let mut exts = vec!["txt"];
-    for e in crate::code::all_extensions() {
-        if !exts.contains(&e) {
-            exts.push(e);
-        }
-    }
-    let mut dialog = rfd::FileDialog::new()
-        .set_title("Import text files")
-        .add_filter("Text and code", &exts)
-        .add_filter("All files", &["*"]);
-    if let Some(dir) = s.path.parent() {
-        dialog = dialog.set_directory(dir);
-    }
-    let Some(paths) = dialog.pick_files() else {
-        return;
-    };
+pub fn import_text_files(s: &mut Session, paths: &[PathBuf]) {
     let mut notes = Vec::new();
     let mut skipped = Vec::new();
-    for p in &paths {
+    for p in paths {
         match plain::read_text_file(p) {
             Ok(n) => notes.push(n),
             Err(e) => skipped.push(e),
@@ -152,38 +115,20 @@ pub fn import_text_files(s: &mut Session) {
     s.notify(text, added.is_empty());
 }
 
-/// "Save a backup copy…" (DESIGN §10.9): the vault file exactly as it is
-/// on disk, after saving pending changes, read back and compared. The
-/// result goes to the status bar.
-pub fn backup(s: &mut Session) {
+/// "Save a backup copy…" (DESIGN §10.9) to `target`: the vault file
+/// exactly as it is on disk, after saving pending changes, read back and
+/// compared. The result goes to the status bar; `Err` is a target that
+/// can't be used, to choose another.
+pub fn backup(s: &mut Session, target: &Path) -> Result<(), String> {
+    if is_vault_file(target, &s.path) {
+        return Err("That is the vault itself. Choose another name or drive.".into());
+    }
     if s.has_unsaved() && !s.save() {
         let e = s.save_error.clone().unwrap_or_default();
         s.notify(format!("No backup: the vault couldn't be saved first. {e}"), true);
-        return;
+        return Ok(());
     }
-    let date = chrono::Local::now().format("%Y-%m-%d");
-    let mut dialog = rfd::FileDialog::new()
-        .set_title("Save a backup copy")
-        .set_file_name(format!("{}-backup-{date}.heim", file_stem(&s.path)))
-        .add_filter("Heimdall vault", &["heim"]);
-    if let Some(dir) = s.path.parent() {
-        dialog = dialog.set_directory(dir);
-    }
-    let Some(picked) = dialog.save_file() else {
-        return;
-    };
-    let target = match with_extension(picked, "heim") {
-        Ok(t) => t,
-        Err(e) => {
-            s.notify(e, true);
-            return;
-        }
-    };
-    if is_vault_file(&target, &s.path) {
-        s.notify("That is the vault itself. Choose another name or drive.", true);
-        return;
-    }
-    match copy_verified(&s.path, &target) {
+    match copy_verified(&s.path, target) {
         Ok(()) => {
             s.vault.content.last_backup = Some(heimdall_core::content::now());
             s.touch(None);
@@ -191,6 +136,7 @@ pub fn backup(s: &mut Session) {
         }
         Err(e) => s.notify(format!("No backup: {e}"), true),
     }
+    Ok(())
 }
 
 /// Copies `from` to `to` atomically, then reads `to` back and compares it
@@ -456,6 +402,8 @@ pub struct ExportVault {
     error: Option<String>,
     /// "Exported 2 notes to x.heim", for the status bar once the page closes.
     exported: Option<String>,
+    /// Where to save the new vault, while being asked.
+    prompt: Option<PathPrompt>,
 }
 
 const NEW_PW: &str = "export_pw";
@@ -480,10 +428,29 @@ impl ExportVault {
             code_actions: CodeActions::default(),
             error: None,
             exported: None,
+            prompt: None,
         }
     }
 
     fn ui(&mut self, ctx: &egui::Context, s: &mut Session) -> Option<Action> {
+        if let Some(prompt) = self.prompt.as_mut() {
+            match prompt.ui(ctx) {
+                path_prompt::Outcome::Open => {}
+                path_prompt::Outcome::Canceled => self.prompt = None,
+                path_prompt::Outcome::Chosen(paths) => {
+                    if let Some(path) = paths.into_iter().next() {
+                        if is_vault_file(&path, &s.path) {
+                            prompt.error =
+                                Some("That is the vault that is open. Choose another name.".into());
+                        } else {
+                            self.prompt = None;
+                            self.target = Some(path.clone());
+                            self.start(ctx, s, path);
+                        }
+                    }
+                }
+            }
+        }
         if let Some(result) = self.job.as_ref().and_then(Job::poll) {
             self.job = None;
             match result {
@@ -517,39 +484,35 @@ impl ExportVault {
         action
     }
 
-    /// Asks where to save (the first time), then runs Argon2id in the
-    /// background: checks the password against the open vault, creates the
-    /// new vault and writes it.
+    /// Asks where to save (the first time), then [`Self::start`].
     fn export(&mut self, ctx: &egui::Context, s: &Session) {
         self.error = None;
-        let path = match (&self.target, self.same_password) {
-            (Some(p), true) => p.clone(),
-            _ => {
-                let mut dialog = rfd::FileDialog::new()
-                    .set_title("Export notes")
-                    .set_file_name(format!("{}-export.heim", file_stem(&s.path)))
-                    .add_filter("Heimdall vault", &["heim"]);
-                if let Some(dir) = s.path.parent() {
-                    dialog = dialog.set_directory(dir);
-                }
-                let Some(picked) = dialog.save_file() else {
-                    return;
-                };
-                let picked = match with_extension(picked, "heim") {
-                    Ok(p) => p,
-                    Err(e) => {
-                        self.error = Some(e);
-                        return;
-                    }
-                };
-                if is_vault_file(&picked, &s.path) {
-                    self.error = Some("That is the vault that is open. Choose another name.".into());
-                    return;
-                }
-                picked
-            }
-        };
-        self.target = Some(path.clone());
+        if let (Some(p), true) = (&self.target, self.same_password) {
+            let p = p.clone();
+            self.start(ctx, s, p);
+            return;
+        }
+        let name = format!("{}-export.heim", file_stem(&s.path));
+        let start = s
+            .path
+            .parent()
+            .map(|d| d.join(&name))
+            .unwrap_or_else(|| name.into());
+        self.prompt = Some(
+            PathPrompt::new(
+                "Export notes",
+                "Save",
+                path_prompt::Kind::Save { ext: "heim".into() },
+                &start,
+            )
+            .filter("Heimdall vault", &["heim"]),
+        );
+    }
+
+    /// Runs Argon2id in the background: checks the password against the
+    /// open vault, creates the new vault and writes it to `path`.
+    fn start(&mut self, ctx: &egui::Context, s: &Session, path: PathBuf) {
+        self.error = None;
         let ids = chosen(&self.picks);
         let password = SecretString::from(self.password.text.clone());
         let check_same = !self.same_password;
@@ -1078,6 +1041,8 @@ pub struct ExportText {
     picks: Vec<Pick>,
     secrets: Secrets,
     error: Option<String>,
+    /// Where to save, while being asked.
+    prompt: Option<PathPrompt>,
 }
 
 impl ExportText {
@@ -1091,11 +1056,28 @@ impl ExportText {
             picks: picks(&content.notes, |n| Some(n.id) == active),
             secrets: Secrets::Hide,
             error: None,
+            prompt: None,
         }
     }
 
     fn ui(&mut self, ctx: &egui::Context, s: &mut Session) -> Option<Action> {
-        let action = show(ctx, s, self);
+        let mut action = show(ctx, s, self);
+        if let Some(prompt) = self.prompt.as_mut() {
+            match prompt.ui(ctx) {
+                path_prompt::Outcome::Open => {}
+                path_prompt::Outcome::Canceled => self.prompt = None,
+                path_prompt::Outcome::Chosen(paths) => {
+                    if let Some(path) = paths.into_iter().next() {
+                        if is_vault_file(&path, &s.path) {
+                            prompt.error = Some("That is the vault file. Choose another name.".into());
+                        } else {
+                            self.prompt = None;
+                            action = self.write(s, &path).or(action);
+                        }
+                    }
+                }
+            }
+        }
         if let Some(gate) = self.gate.as_mut() {
             match gate.ui(ctx, s) {
                 Outcome::Open => {}
@@ -1110,9 +1092,9 @@ impl ExportText {
         action
     }
 
-    /// Asks where to save, then writes one file, or a `.zip` for several.
-    fn export(&mut self, s: &mut Session) -> Option<Action> {
-        self.error = None;
+    /// The files to write: one per note, and the name to suggest with its
+    /// extension (a `.zip` for several notes).
+    fn files(&self, s: &Session) -> (Vec<plain::TextFile>, String, String) {
         let ids = chosen(&self.picks);
         let notes: Vec<&Note> = s
             .vault
@@ -1123,36 +1105,45 @@ impl ExportText {
             .collect();
         let crlf = s.vault.content.editor.line_ending == heimdall_core::content::LineEnding::Crlf;
         let files = plain::export_files(&notes, self.secrets, crlf);
-        let (default_name, ext) = match files.as_slice() {
+        let (name, ext) = match files.as_slice() {
             [one] => {
                 let ext = one.name.rsplit_once('.').map_or("txt", |(_, e)| e).to_owned();
                 (one.name.clone(), ext)
             }
             _ => (format!("{}-notes.zip", file_stem(&s.path)), "zip".to_owned()),
         };
+        (files, name, ext)
+    }
+
+    /// Asks where to save, then [`Self::write`].
+    fn export(&mut self, s: &mut Session) -> Option<Action> {
+        self.error = None;
+        let (_, name, ext) = self.files(s);
         let filter = if ext == "zip" { "Zip archive" } else { "Text file" };
-        let mut dialog = rfd::FileDialog::new()
-            .set_title("Export as plain text")
-            .set_file_name(&default_name)
-            .add_filter(filter, &[ext.as_str()]);
-        if let Some(dir) = s.path.parent() {
-            dialog = dialog.set_directory(dir);
-        }
-        let path = match with_extension(dialog.save_file()?, &ext) {
-            Ok(p) => p,
-            Err(e) => {
-                self.error = Some(e);
-                return None;
-            }
-        };
-        if is_vault_file(&path, &s.path) {
-            self.error = Some("That is the vault file. Choose another name.".into());
-            return None;
-        }
+        let start = s
+            .path
+            .parent()
+            .map(|d| d.join(&name))
+            .unwrap_or_else(|| name.clone().into());
+        let mut prompt = PathPrompt::new(
+            "Export as plain text",
+            "Save",
+            path_prompt::Kind::Save { ext: ext.clone() },
+            &start,
+        );
+        prompt = prompt.filter(filter, &[ext.as_str()]);
+        self.prompt = Some(prompt);
+        None
+    }
+
+    /// Writes one file, or a `.zip` for several.
+    fn write(&mut self, s: &mut Session, path: &Path) -> Option<Action> {
+        let (files, _, _) = self.files(s);
         let written = match files.as_slice() {
-            [one] => write_atomic(&path, one.text.as_bytes()).map_err(|e| error_message(&e)),
-            _ => plain::zip(&files)
-                .and_then(|bytes| write_atomic(&path, &bytes).map_err(|e| error_message(&e))),
+            [one] => write_atomic(path, one.text.as_bytes()).map_err(|e| error_message(&e)),
+            _ => {
+                plain::zip(&files).and_then(|bytes| write_atomic(path, &bytes).map_err(|e| error_message(&e)))
+            }
         };
         match written {
             Ok(()) => {
@@ -1160,7 +1151,7 @@ impl ExportText {
                     format!(
                         "Exported {} as plain text to {}",
                         plural(files.len(), "note"),
-                        file_name(&path)
+                        file_name(path)
                     ),
                     false,
                 );

@@ -5,6 +5,8 @@ mod app;
 mod chrome;
 mod code;
 mod focus;
+mod logo_mark;
+mod path_prompt;
 mod plain;
 mod screens;
 mod search;
