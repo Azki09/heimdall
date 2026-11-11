@@ -44,7 +44,7 @@ install -D -m 755 "$here/uninstall.sh" "$data/heimdall/uninstall.sh"
 
 mkdir -p "$data/applications"
 entry="$data/applications/heimdall.desktop"
-sed "s|^Exec=.*|Exec=\"$bin/heimdall\"|" "$here/heimdall.desktop" > "$entry.tmp"
+sed "s|^Exec=.*|Exec=\"$bin/heimdall\" --gui|" "$here/heimdall.desktop" > "$entry.tmp"
 chmod 644 "$entry.tmp"
 mv -f "$entry.tmp" "$entry"
 

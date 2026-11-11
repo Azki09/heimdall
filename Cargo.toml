@@ -5,10 +5,10 @@ members = ["crates/heimdall-core", "crates/heimdall-platform", "crates/heimdall-
 exclude = ["fuzz"]
 
 [workspace.package]
-version = "1.2.2"
+version = "1.3.0"
 edition = "2021"
 license = "GPL-3.0-only"
-rust-version = "1.82"
+rust-version = "1.89"
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

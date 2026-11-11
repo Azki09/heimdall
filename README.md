@@ -72,7 +72,7 @@ them. Set `version` to the number of the
 [latest release](https://github.com/Azki09/heimdall/releases/latest):
 
 ```sh
-version=1.2.2
+version=1.3.0
 base=https://github.com/Azki09/heimdall/releases/download/v$version
 cd ~/Downloads
 curl -LO "$base/SHA256SUMS.txt"
@@ -88,7 +88,8 @@ gh attestation verify "heimdall_${version}_amd64.deb" -R Azki09/heimdall   # opt
 sudo apt install "./heimdall_${version}_amd64.deb"
 ```
 
-Open it from the app menu ("Heimdall") or with `heimdall` in a terminal. To
+Open it from the app menu ("Heimdall") or with `heimdall --gui` in a terminal
+(plain `heimdall` there is the [terminal mode](#terminal-mode-linux)). To
 update, install the new `.deb` the same way. To remove it:
 `sudo apt remove heimdall`.
 
@@ -200,6 +201,45 @@ Everything works without a mouse. The full list is in *Settings → Shortcuts*.
 | Next / previous control, press it | `Tab` / `Shift+Tab`, `Space` or `Enter` |
 | Close a menu or cancel a dialog | `Esc` |
 
+## Terminal mode (Linux)
+
+The same `heimdall` also edits your notes without a window, like `nano`.
+It works on the notes of your normal vault, so anything you write there
+shows up in the app, and the other way round.
+
+```sh
+heimdall                 # unlock, list the notes, pick one by number or title
+heimdall hola.txt        # open the note "hola.txt" (created when you save)
+heimdall ls [filter]     # print the titles, one per line
+heimdall rm hola.txt     # move a note to the trash (asks first)
+heimdall --gui           # open the window instead
+```
+
+It asks for the vault password every time, like `sudo`, and for the USB key
+if the vault needs one. It uses the vault you opened last; choose another
+with `--vault <path>` or `$HEIMDALL_VAULT` (Hardened and Paranoid vaults
+are never remembered, so they need it).
+
+In the editor: `^S` save, `^Q` quit, `^F` find, `^Z` undo, `^G` help
+(`^S` means Ctrl+S). A secret shows as `[secret]`; put the cursor on it and
+press `^R` to see or edit it (it shows underlined). `^T` turns on code
+mode for the note: line numbers, the app's colors, and a small map of the
+file on the right that the mouse wheel scrolls. A new note named like a
+source file (`backup.py`, `index.html`, `main.c`) starts in code mode, with
+its language taken from the extension. In the list of notes, Tab
+completes the title you are typing. The vault locks by itself exactly as in the
+app (idle time, USB key removed, sleep), saving first. Nothing is ever
+written to disk unencrypted, and the note doesn't stay in the terminal's
+scrollback.
+
+A vault is open in one place at a time: while it is open in the window, the
+terminal refuses it, and the other way round. Lock or close it there first.
+
+Terminal mode is small on purpose: settings, access, export and everything
+new are in the app. From the AppImage, run it with a note or a command
+(`./Heimdall-*.AppImage hola.txt`); with nothing, the AppImage opens the
+window.
+
 ## Moving notes in and out
 
 From the `⌄` menu next to the tabs:
@@ -223,7 +263,7 @@ in Spanish) and summarized in [`SECURITY.md`](SECURITY.md).
 
 ## Building from source
 
-You need [Rust](https://rustup.rs) (stable, 1.82 or newer), and the MSVC
+You need [Rust](https://rustup.rs) (stable, 1.89 or newer), and the MSVC
 build tools on Windows or a C toolchain (`build-essential`) on Linux.
 On Linux the executable is `target/release/heimdall`.
 

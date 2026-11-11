@@ -434,7 +434,7 @@ fn rasterize(polygons: &[&[[f32; 2]]], n: usize) -> Vec<u8> {
         }
         xs.sort_by(f32::total_cmp);
         let row = (sy / SUB) * n;
-        for span in xs.chunks_exact(2) {
+        for span in xs.as_chunks::<2>().0 {
             // Samples sit at the middle of each sub-column.
             let from = (span[0] * scale - 0.5).ceil().max(0.0) as usize;
             let to = ((span[1] * scale - 0.5).ceil().max(0.0) as usize).min(n * SUB);

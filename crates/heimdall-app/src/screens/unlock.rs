@@ -95,8 +95,19 @@ impl Unlock {
         self.locked.as_ref().is_ok_and(|l| l.requires_keyfile())
     }
 
+    /// Shows `error` under the field (the vault turned out to be open
+    /// elsewhere after unlocking).
+    pub fn with_error(mut self, error: String) -> Self {
+        self.error = Some(error);
+        self
+    }
+
     fn start(&mut self, ctx: &egui::Context) {
         let Ok(locked) = &self.locked else { return };
+        if crate::vault_lock::VaultLock::is_busy(&self.path) {
+            self.error = Some(crate::vault_lock::BUSY.to_owned());
+            return;
+        }
         let locked = locked.clone();
         self.error = None;
         if self.use_recovery {

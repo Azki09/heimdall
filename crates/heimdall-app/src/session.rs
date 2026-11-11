@@ -12,6 +12,7 @@ use uuid::Uuid;
 
 use crate::support::{file_name, save_error_message};
 use crate::usb::{Presence, UsbKey};
+use crate::vault_lock::VaultLock;
 
 /// Encrypted autosave runs this long after the last change (DESIGN §10.2).
 pub const AUTOSAVE_DELAY: Duration = Duration::from_secs(2);
@@ -61,13 +62,22 @@ pub struct Session {
     /// A message for the status bar ("Exported 3 notes to …"), and when it
     /// was set. Shown for [`NOTICE_FOR`]. `true` = an error.
     pub notice: Option<(String, bool, Instant)>,
+    /// Keeps the terminal mode (and other windows) off this vault while it
+    /// is open here (DESIGN §17.1). Released when the session is dropped.
+    _lock: Option<VaultLock>,
 }
 
 /// How long a status bar notice stays.
 pub const NOTICE_FOR: Duration = Duration::from_secs(10);
 
 impl Session {
-    pub fn new(ctx: &egui::Context, vault: Vault, path: PathBuf, usb: Option<UsbKey>) -> Self {
+    pub fn new(
+        ctx: &egui::Context,
+        vault: Vault,
+        path: PathBuf,
+        usb: Option<UsbKey>,
+        lock: Option<VaultLock>,
+    ) -> Self {
         let mut s = Self {
             vault,
             path,
@@ -82,6 +92,7 @@ impl Session {
             presence: None,
             access_changed: false,
             notice: None,
+            _lock: lock,
         };
         s.update_presence(ctx);
         s.lock_key_memory();
@@ -100,7 +111,10 @@ impl Session {
     pub fn update_presence(&mut self, ctx: &egui::Context) {
         let usb = self.usb.as_ref().filter(|k| self.key_slot(k).is_some());
         self.presence = match (usb, self.vault.requires_keyfile()) {
-            (Some(key), true) => Some(Presence::start(ctx, key)),
+            (Some(key), true) => {
+                let ctx = ctx.clone();
+                Some(Presence::start(key, move || ctx.request_repaint()))
+            }
             _ => None,
         };
     }

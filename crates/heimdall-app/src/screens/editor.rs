@@ -1041,13 +1041,12 @@ fn tabs(ui: &mut Ui, s: &mut Session, st: &mut EditorState, avail: f32) {
 
     if commit_rename {
         if let Some((id, text)) = st.renaming.take() {
-            if let Some(n) = content.note_mut(id) {
-                let title = text.trim().to_owned();
-                if n.title != title {
-                    n.title = title;
+            // Two tabs never share a title: a taken one gets " (2)".
+            if content.rename_note(id, &text) {
+                if let Some(n) = content.note_mut(id) {
                     n.modified = now;
-                    changed_note = Some(id);
                 }
+                changed_note = Some(id);
             }
             st.focus_editor = true;
         }

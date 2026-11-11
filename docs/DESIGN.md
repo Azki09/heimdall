@@ -439,6 +439,7 @@ Todos los atajos aparecen en *Settings → Shortcuts*.
 - **Los atajos que hacen algo una sola vez** (Ctrl+T, Ctrl+W, Ctrl+Shift+T, Ctrl+S, Ctrl+L, Ctrl+1…9…) **no se repiten al mantener las teclas**: antes, mantener Ctrl+T abría una pestaña por cada repetición del teclado, y Ctrl+W cerraba varias. Ctrl+Tab, F3 y el zoom sí se repiten.
 - **Con AltGr no hay atajos de Ctrl.** Windows envía AltGr como Ctrl+Alt, y AltGr escribe caracteres en muchos teclados (en polaco AltGr+L es "ł"; en español de España AltGr+2 es "@"). Antes eso podía bloquear la vault o cambiar de pestaña al escribir.
 
+- **Títulos únicos (v1.3).** Dos notas abiertas nunca tienen el mismo título. Si al renombrar, importar o restaurar de la papelera el título ya existe, la nota recibe ` (2)`, ` (3)`… **antes de la extensión**, como en Windows: `hola.txt` → `hola (2).txt` (así conserva su lenguaje en modo código). Una extensión es lo que sigue al último punto si mide de 1 a 8 letras o números. Las bóvedas anteriores se corrigen al abrirse: de las notas que comparten título, la editada más recientemente se queda con el nombre (`Content::dedupe_titles`). Las notas sin título propio (las que muestran su primera línea) no se tocan; el modo terminal las distingue solo en sus listas (§17.2). Funciones: `unique_title`, `rename_note`, `free_title` en `content.rs`.
 - **Indicador de cambios:** un punto `•` en la pestaña con cambios sin guardar, igual que en el Bloc de notas.
 - **Restaurar sesión:** al abrir la vault, las pestañas aparecen en el mismo orden, con la misma pestaña activa y el cursor donde estaba. Todo eso vive dentro del contenido cifrado.
 - **Ancho de las pestañas:** todas miden lo mismo, 200 px si caben; con más pestañas se achican por igual hasta 96 px. El título se corta con "…" según el ancho, y el título completo aparece al pasar el ratón.
@@ -789,8 +790,8 @@ Si una señal de D-Bus no llega (un contenedor sin logind, un escritorio mínimo
 | **v1.1** | YubiKey/FIDO2 |
 | **v1.0** | Formato congelado (§5.6), **menú contextual general** (clic derecho con Cut / Copy / Paste / Select all en cualquier parte del texto), copia de respaldo manual, exportar e importar, cifrado y en texto plano (§10.9) |
 | **v1.2** | Linux (§13.1) |
-| **Siguiente** | Modo terminal sencillo, solo Linux (§17). Una vez hecho, la terminal no recibe más funciones |
-| **v1.3** | Generador de contraseñas: inserta la contraseña directo como secreto `{*…*}`, sin pasar por el portapapeles |
+| **v1.3** | Modo terminal sencillo, solo Linux (§17), y bloqueo exclusivo de la bóveda entre ventanas y terminal. La terminal no recibe más funciones |
+| **v1.4** | Generador de contraseñas: inserta la contraseña directo como secreto `{*…*}`, sin pasar por el portapapeles |
 | **v2.0 — App completa** | Windows y Linux: menú lateral (el generador se muda ahí), etiquetas, notas fijadas, quizás historial de notas. Cambio de formato del contenido: decidir antes cómo se comporta una bóveda 2.0 abierta en 1.x |
 | **Futuro** | YubiKey; Shamir 2-de-3; macOS; modo terminal en Windows |
 
@@ -972,52 +973,104 @@ Modales sobre la pantalla de origen oscurecida. Mismo patrón en todos: título 
 
 ---
 
-## 17. Modo terminal (diseño, sin implementar)
+## 17. Modo terminal
 
-Decidido con el usuario el 2026-11-10. Mockups:
-https://claude.ai/artifact/LNxnNe8mAEQ8RqiCbXKsMw
+Decidido con el usuario el 2026-11-10, implementado en la 1.3 (`term/` en
+`heimdall-app`). Mockups: https://claude.ai/artifact/LNxnNe8mAEQ8RqiCbXKsMw
 
 **Alcance.** La app gráfica (Windows y Linux) es el producto completo y es
 donde llegan las funciones nuevas. El modo terminal es a propósito sencillo:
 abrir, editar, listar y borrar notas de la bóveda normal. No tiene ajustes,
-perfiles, accesos, exportar ni generador. Es lo siguiente después de las
-correcciones de la 1.2.x, solo en Linux (en Windows haría falta un segundo
-ejecutable de consola). Una vez hecho, todo lo nuevo llega a la app gráfica.
+perfiles, accesos, exportar ni generador. Solo en Linux (en Windows haría
+falta un segundo ejecutable de consola). La terminal no recibe más funciones.
 
 ### 17.1 Funcionamiento
 
 - `heimdall hola.txt` abre o crea la nota titulada `hola.txt` **dentro de la
   bóveda del usuario**; no es una bóveda por archivo. La nota aparece también
-  en la app gráfica.
-- Pide la contraseña de la bóveda como `sudo`. Con presencia (USB) exige la
-  llave igual que la app.
-- **Bloqueo exclusivo:** si la bóveda está abierta en la app gráfica, la
-  terminal se niega con un mensaje. (Hablar con la app abierta por IPC queda
-  para después.)
+  en la app gráfica. Una nota nueva se crea al guardar por primera vez; si
+  se sale sin guardar, no se crea.
+- **Qué bóveda:** `--vault <ruta>`, si no `$HEIMDALL_VAULT`, si no la más
+  reciente de `recent.txt`, y si no hay ninguna, pregunta la ruta. Las
+  bóvedas Hardened y Paranoid no se anotan en recientes (§6.1), así que
+  usan una de las dos primeras.
+- **Ventana o terminal** (el mismo ejecutable): con un argumento (nota o
+  comando) siempre es modo terminal. Sin argumentos, es modo terminal si
+  stdin y stdout son una terminal, y ventana si no (menú de aplicaciones,
+  gestor de archivos). `--gui` fuerza la ventana y es lo que usa
+  `heimdall.desktop`. Desde la AppImage, sin argumentos siempre es la
+  ventana (la gente la arranca desde una terminal).
+- Pide la contraseña de la bóveda como `sudo` (tres intentos, sin eco). Si
+  la bóveda exige USB, espera a que se conecte y la vigila igual que la app
+  (§8.3). No se abre con el código de recuperación: eso obliga a rehacer
+  los accesos y es cosa de la app.
+- **Bloqueo exclusivo, en los dos sentidos** (`vault_lock.rs`): antes de
+  abrir, la app y la terminal toman un bloqueo del sistema (`flock` /
+  `LockFileEx`) sobre un archivo vacío cuyo nombre es un hash de la ruta de
+  la bóveda, en `$XDG_RUNTIME_DIR/heimdall/` (Linux) o en la carpeta de
+  configuración. Nunca se escribe nada junto a la bóveda, y el sistema
+  suelta el bloqueo si el proceso muere. Con la bóveda abierta en un lado,
+  el otro se niega con un mensaje; esto también impide abrirla en dos
+  ventanas. Al bloquearse la app (inactividad, manual) el bloqueo se
+  suelta. (Hablar con la app abierta por IPC queda para después.)
 - **Sin caché de la llave** (decidido 2026-11-10): cada comando pide la
-  contraseña. Un agente que guarde la llave entre comandos sería la parte más
-  delicada y va contra "sencillo". En `heimdall` sin argumentos la sesión
-  sigue abierta mientras se eligen y editan varias notas, y se bloquea con
-  el tiempo de inactividad del perfil. Si el uso real lo pide, se reconsidera
-  un caché por perfil (Basic ~5 min, Hardened corto, Paranoid nunca).
+  contraseña. En `heimdall` sin argumentos la sesión sigue abierta mientras
+  se eligen y editan varias notas.
+- **Bloqueo automático**, con las reglas de la app: inactividad del perfil
+  (también esperando en una pregunta), USB retirada, sesión bloqueada,
+  suspensión. Guarda cifrado, borra la pantalla del editor y deja un
+  mensaje: `[heimdall] Vault locked: idle for 5 min. "hola.txt" was saved.`
+  Si guardar falla, no se bloquea (no se pierde trabajo), salvo USB
+  retirada, apagado o terminal cerrada. `^L` bloquea a mano.
+- **Terminal cerrada o `SIGTERM`:** guarda cifrado y sale (nano dejaría un
+  `.save` en claro; aquí no). Al apagar el equipo, igual que la app
+  (inhibidor de logind mientras haya cambios).
 - **Nunca se escribe texto plano a disco**: ni archivos temporales ni swap
-  (mlock, igual que la app, §13.1).
+  (mlock de la llave, igual que la app, §13.1), y el editor usa la pantalla
+  alterna para que nada de la nota quede en el historial de la terminal.
+  El búfer del texto se reserva entero al abrir (2 MB) para que no se
+  copie al crecer.
 
 ### 17.2 Comandos
 
 | Comando | Qué hace |
 |---|---|
-| `heimdall` | Banner, datos de la bóveda, contraseña, lista numerada `[1] título  editada fecha` y `:: Open note [1-6, n = new, Enter = quit] :` |
-| `heimdall <título>` | Abre o crea esa nota en el editor. Si hay títulos repetidos, lista para elegir |
-| `heimdall ls [filtro]` | Solo los títulos, uno por línea, sin banner (sirve en scripts) |
+| `heimdall` | Banner, `:: Vault` y `:: Stored in` (el archivo `.heim`), contraseña, lista numerada `[1] título  edited fecha` y `:: Open note [number or title, n = new, ? = help, Enter = quit] :`. Al salir del editor vuelve a la lista |
+| `heimdall <título>` | Abre o crea esa nota en el editor. Varias palabras sin comillas forman un solo título |
+| `heimdall ls [filtro]` | Solo los títulos, uno por línea en stdout, sin banner (sirve en scripts). El filtro compara con el título tal como se muestra, así que no sirve para sondear un secreto |
 | `heimdall rm <título>` | Manda la nota a la papelera, **siempre preguntando antes**: `:: Move "x" to trash? [y/N] :`. Por defecto No |
-| `heimdall --help` | Banner y ayuda |
+| `heimdall -- <título>` | Para una nota llamada `ls`, `rm` o que empiece con `-` |
+| `heimdall --help`, `--version` | Banner y ayuda; versión |
 
-Los mensajes de error y avisos empiezan con `[heimdall]`.
+**La lista de notas** (`heimdall` sin argumentos):
+
+- Se abre una nota por **número o por título**. **Tab completa** el título
+  como una shell: hasta donde coinciden los candidatos y, si no hay más que
+  añadir, los lista debajo. Sin distinguir mayúsculas.
+- Un título que no existe pregunta antes de crear:
+  `:: No note is called "ideas". Create it? [y/N] :`. `n` pide un título y
+  crea la nota; si el título ya existe recibe ` (2)` (§10.1).
+- `?` muestra una ayuda corta en la pantalla alterna (no ensucia la lista).
+- **Nombres únicos en las listas:** los títulos ya son únicos (§10.1); las
+  notas sin título que comparten primera línea, o cuyos títulos solo
+  difieren en un secreto oculto, se muestran como `texto` y `texto (2)`,
+  sin tocar la nota. `ls`, `rm` y `heimdall <título>` usan esos mismos
+  nombres; ya no existe la lista "¿cuál de las dos?".
+- **Terminal limpia:** la pregunta de la contraseña (y los
+  `Wrong password`, y la espera de la USB) se borra en cuanto la bóveda
+  abre, también en `ls`, `rm` y `heimdall <título>`. Al volver del editor,
+  la lista se redibuja **en el mismo sitio** en vez de apilarse. El banner
+  y las líneas `:: Vault` / `:: Stored in` se quedan. Implementación:
+  `prompt.rs` cuenta las filas que escribe y las borra con `ESC[nA ESC[J`.
+
+Opciones: `-v, --vault <ruta>`, `--gui`. Los avisos y las preguntas van a
+stderr y empiezan con `[heimdall]`; a stdout solo va lo pedido. Código de
+salida: 0 bien, 1 error o cancelado, 2 argumentos mal escritos.
 
 ### 17.3 Aspecto
 
-**Sin colores**, solo caracteres del teclado.
+**Sin colores**, solo caracteres del teclado. La única excepción es el
+modo código (§17.4).
 
 - **Salida normal** (estilo ffuf): banner = el logo ASCII exacto de la
   pantalla de inicio (`widgets.rs`, `LOGO`, no el logo de runas), luego
@@ -1026,11 +1079,66 @@ Los mensajes de error y avisos empiezan con `[heimdall]`.
   mide menos de 80 columnas (el logo mide 79), en su lugar una línea:
   `HEIMDALL v<versión> :: encrypted notes`.
 - **Editor** a pantalla completa, como nano. Separadores hechos de `-`.
-  - Arriba: bóveda, título de la nota y `Modified` si hay cambios.
+  - Arriba: ` Heimdall  <bóveda>`, el título centrado y, a la derecha,
+    `Modified` si hay cambios o `New note` si aún no existe.
   - Abajo, **siempre visibles**: `^S Save  ^Q Quit  ^F Find  ^R Reveal  ^G Help`
     (notación `^`, como nano).
-  - **Línea de estado siempre visible:** `Ln/Col`. La cuenta regresiva del
-    bloqueo aparece **solo en el último minuto**.
+  - **Línea de estado siempre visible:** `Ln/Col`, avisos entre corchetes
+    en el centro, y la cuenta regresiva del bloqueo (`Lock in 0:42`)
+    **solo en el último minuto**. La columna cuenta lo que se ve, para no
+    delatar la longitud de un secreto.
   - **Secretos** `{*…*}`: se muestran como `[secret]`, de ancho fijo para no
-    revelar la longitud. `^R` muestra el texto `{*…*}` en su lugar.
+    revelar la longitud, y son un bloque: el cursor los salta y Retroceso /
+    Supr los borran enteros (`^Z` lo deshace). `^R` muestra **el secreto
+    bajo el cursor**: solo su valor, **subrayado y sin las marcas** `{*` `*}`,
+    para leerlo o editarlo. Se oculta al sacar el cursor, con Enter o con
+    `^R` otra vez; borrar su último carácter borra el secreto entero.
+    Buscar no encuentra texto dentro de un secreto oculto.
+  - **Teclas:** flechas, Ctrl+flechas (palabra), Inicio/Fin, Ctrl+Inicio/Fin,
+    RePág/AvPág; `^S` guardar, `^Q` salir (con cambios pregunta
+    `Save changes to "x"?` Y / N / Esc), `^F` buscar (Enter siguiente,
+    `^P` anterior, Esc), `^Z` / `^Y` deshacer y rehacer, `^K` cortar línea,
+    `^U` pegar, `^T` modo código, `^L` bloquear, `^G` ayuda.
+  - Ajuste de línea por palabras (salvo en modo código). Tab inserta lo que diga el
+    ajuste de la bóveda. Pegar desde la terminal pasa por el detector de
+    secretos (§11.3) si está activo. Límite de 2 MB por nota, como la app.
+- **Implementación:** `crossterm` (modo crudo, teclas, pantalla alterna) y
+  un editor propio pequeño (`term/text.rs`, sin terminal, con pruebas);
+  `signal-hook` para SIGHUP/SIGTERM. Ambas solo en Linux.
 
+### 17.4 Modo código en la terminal
+
+Decidido con el usuario el 2026-11-11. Demo:
+https://claude.ai/artifact/FmLMhvb84AJ3EQpgJkxnvj
+
+- `^T` lo activa o desactiva **en la nota** (el mismo dato que usa la app,
+  `Note.code`, §10.6): una nota en modo código en la app abre así en la
+  terminal, y al revés. El cambio se guarda con `^S`.
+- **Nota nueva con nombre de archivo de código** (`respaldo.py`,
+  `index.html`, `main.c`…): empieza ya en modo código, con el lenguaje de
+  su extensión (`code::by_extension`). Markdown no: es prosa y queda como
+  nota normal. Solo al crear la nota; después manda lo guardado en ella,
+  así `^T` la puede apagar para siempre.
+- **Lenguaje:** el guardado en la nota o, si no hay, el detectado como en
+  la app (extensión del título o línea `#!`). Se ve arriba a la derecha:
+  `Code: Python`.
+- **Colores:** el resaltador y la paleta de la app (`code.rs`, `theme.rs`),
+  en color de 24 bits si la terminal lo anuncia (`COLORTERM=truecolor` o
+  `24bit`). Si no, sin colores: palabras clave en negrita y comentarios
+  atenuados.
+- **Números de línea** a la izquierda, atenuados. **Sin ajuste de línea**:
+  las líneas largas se desplazan horizontalmente siguiendo al cursor.
+  Enter conserva la sangría de la línea.
+- **Minimapa** a la derecha, separado del código por una barra `|`: la
+  silueta del archivo en braille (cada carácter son 2 × 4 puntos; un punto
+  = 4 columnas de una línea; 9 caracteres de ancho, 4 líneas por fila). La
+  parte visible se marca más clara. Si el archivo es más largo que el
+  minimapa, este se desplaza en proporción. Se oculta con menos de 70
+  columnas.
+- **Ratón** (solo en modo código): la rueda desplaza 3 líneas sobre el
+  código y 12 sobre el minimapa; un clic o arrastre en el minimapa salta a
+  esa parte. Como capturar el ratón quita la selección de la terminal, se
+  selecciona con Mayús+arrastrar; fuera del modo código el ratón no se
+  captura.
+- La barra de atajos cambia `^R Reveal` por `^T Code` (`^R` sigue
+  funcionando).

@@ -1,4 +1,4 @@
-# Pushing a tag like v1.2.2 builds Heimdall on GitHub's runners for Windows
+# Pushing a tag like v1.3.0 builds Heimdall on GitHub's runners for Windows
 # (heimdall.exe) and Linux (an AppImage, a .deb and a .tar.gz), and publishes them
 # with their SHA-256 and a build provenance attestation that ties each file
 # to this commit and this workflow run.
@@ -185,7 +185,7 @@ jobs:
           entry="$home/.local/share/applications/heimdall.desktop"
           test -x "$home/.local/bin/heimdall"
           test -f "$home/.local/share/icons/hicolor/512x512/apps/heimdall.png"
-          grep -qx "Exec=\"$home/.local/bin/heimdall\"" "$entry"
+          grep -qx "Exec=\"$home/.local/bin/heimdall\" --gui" "$entry"
           desktop-file-validate "$entry"
           env -u XDG_DATA_HOME -u XDG_CONFIG_HOME HOME="$home" sh "$home/.local/share/heimdall/uninstall.sh"
           test ! -e "$home/.local/bin/heimdall"

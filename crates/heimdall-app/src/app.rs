@@ -332,13 +332,25 @@ impl HeimdallApp {
     fn opened(&mut self, ctx: &egui::Context, mut vault: Vault, path: PathBuf, usb: Option<UsbKey>) {
         // The password fields' text and undo history live in egui's memory.
         wipe_ui_memory(ctx);
-        let purged = vault.content.purge_expired_trash(heimdall_core::content::now());
+        // Opened in a terminal (or another window) since the Unlock screen
+        // checked: give up this copy, the other one may hold newer edits.
+        let lock = match crate::vault_lock::VaultLock::acquire(&path) {
+            Ok(lock) => lock,
+            Err(crate::vault_lock::LockError::Busy) => {
+                drop(vault);
+                let unlock = Unlock::new(path, None).with_error(crate::vault_lock::BUSY.to_owned());
+                self.screen = Screen::Unlock(Box::new(unlock));
+                return;
+            }
+        };
+        let purged =
+            vault.content.purge_expired_trash(heimdall_core::content::now()) + vault.content.dedupe_titles();
         if vault.content.security.remember_recent {
             self.recent.touch(&path);
         } else {
             self.recent.remove(&path);
         }
-        let mut session = Session::new(ctx, vault, path, usb);
+        let mut session = Session::new(ctx, vault, path, usb, lock);
         if purged > 0 {
             session.touch(None);
         }

@@ -166,10 +166,10 @@ fn fixtures_can_be_imported() {
         [
             "Wi-Fi",
             "Servers (2)",
-            "main.rs (2)",
+            "main (2).rs",
             "Wi-Fi (2)",
             "Servers (3)",
-            "main.rs (3)"
+            "main (3).rs"
         ]
     );
     assert_eq!(notes[before + 1].body, basic.content.notes[1].body);

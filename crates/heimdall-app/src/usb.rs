@@ -238,18 +238,19 @@ pub struct Presence {
 }
 
 impl Presence {
-    pub fn start(ctx: &egui::Context, key: &UsbKey) -> Self {
+    /// `wake` runs once when the key goes away.
+    pub fn start(key: &UsbKey, wake: impl Fn() + Send + 'static) -> Self {
         let stop = Arc::new(AtomicBool::new(false));
         let removed = Arc::new(AtomicBool::new(false));
         let path = key.path.clone();
         let hint: [u8; HINT_LEN] = key.keyfile.hint();
-        let (stop_t, removed_t, ctx) = (stop.clone(), removed.clone(), ctx.clone());
+        let (stop_t, removed_t) = (stop.clone(), removed.clone());
         std::thread::spawn(move || {
             while !stop_t.load(Ordering::Relaxed) {
                 let present = read_keyfile(&path).is_some_and(|k| k.hint() == hint);
                 if !present {
                     removed_t.store(true, Ordering::Relaxed);
-                    ctx.request_repaint();
+                    wake();
                     return;
                 }
                 std::thread::sleep(PRESENCE_EVERY);

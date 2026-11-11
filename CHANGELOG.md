@@ -4,6 +4,121 @@ All notable changes to Heimdall. Versions follow
 [Semantic Versioning](https://semver.org). Vaults created by any 1.x version
 keep opening in every later version (`docs/DESIGN.md` section 5.6).
 
+## [Unreleased]
+
+## [1.3.0] - 2026-11-11
+
+### Which file do I download?
+
+| Your system | File | Shows up in the app menu |
+|---|---|---|
+| Windows 10 / 11 (64-bit) | `heimdall.exe` | No installer, run the file |
+| Ubuntu, Debian, Mint (22.04 / 12 or newer) | `heimdall_1.3.0_amd64.deb` | Yes |
+| Any other Linux x86_64 (Fedora 36+, Arch, ...) | `heimdall-1.3.0-linux-x86_64.tar.gz` + `install.sh` | Yes |
+| Linux, portable (USB drive, no install) | `Heimdall-1.3.0-x86_64.AppImage` | No, run the file |
+
+`SHA256SUMS.txt` holds the hash of every file, to check your download.
+
+### Install on Windows
+In PowerShell: download, verify and run `heimdall.exe` (no installer):
+
+```powershell
+cd $HOME\Downloads
+$base = "https://github.com/Azki09/heimdall/releases/download/v1.3.0"
+Invoke-WebRequest "$base/heimdall.exe" -OutFile heimdall.exe
+Invoke-WebRequest "$base/SHA256SUMS.txt" -OutFile SHA256SUMS.txt
+$expected = (Select-String 'heimdall\.exe$' SHA256SUMS.txt).Line.Split(' ')[0]
+if ((Get-FileHash heimdall.exe).Hash -eq $expected) { "OK" } else { "MISMATCH: do not run it" }
+gh attestation verify heimdall.exe -R Azki09/heimdall   # optional, needs the GitHub CLI
+.\heimdall.exe
+```
+
+The executable is not signed yet, so the first time Windows SmartScreen
+may show "Windows protected your PC". If the hash matched, choose
+**More info → Run anyway**.
+
+### Install on Linux
+First download the hash list:
+
+```sh
+cd ~/Downloads
+base=https://github.com/Azki09/heimdall/releases/download/v1.3.0
+curl -LO "$base/SHA256SUMS.txt"
+```
+
+**Ubuntu, Debian, Mint (.deb)**, for every user of the computer:
+
+```sh
+curl -LO "$base/heimdall_1.3.0_amd64.deb"
+sha256sum -c --ignore-missing SHA256SUMS.txt   # must say OK
+gh attestation verify heimdall_1.3.0_amd64.deb -R Azki09/heimdall   # optional
+sudo apt install ./heimdall_1.3.0_amd64.deb
+```
+
+Open it from the app menu, or with `heimdall --gui` from a terminal
+(plain `heimdall` in a terminal is the new terminal mode). Remove: `sudo apt remove heimdall`.
+
+**Any distribution (.tar.gz + install.sh)**, only for you, without sudo:
+
+```sh
+curl -LO "$base/heimdall-1.3.0-linux-x86_64.tar.gz"
+sha256sum -c --ignore-missing SHA256SUMS.txt   # must say OK
+gh attestation verify heimdall-1.3.0-linux-x86_64.tar.gz -R Azki09/heimdall   # optional
+tar xzf heimdall-1.3.0-linux-x86_64.tar.gz
+./heimdall-1.3.0-linux-x86_64/install.sh
+```
+
+If it doesn't appear in the menu right away, log out and back in. Remove:
+`~/.local/share/heimdall/uninstall.sh`.
+
+**Portable (AppImage)**, nothing installed, not in the menu:
+
+```sh
+curl -LO "$base/Heimdall-1.3.0-x86_64.AppImage"
+sha256sum -c --ignore-missing SHA256SUMS.txt   # must say OK
+chmod +x Heimdall-1.3.0-x86_64.AppImage
+./Heimdall-1.3.0-x86_64.AppImage
+```
+
+AppImages need FUSE 2 (`sudo apt install libfuse2` on Ubuntu 22.04,
+`libfuse2t64` on 24.04).
+
+Removing Heimdall never deletes your vaults (`.heim` files).
+
+### Added
+- **Terminal mode (Linux).** `heimdall` in a terminal edits the notes of
+  your normal vault without a window, like `nano`: `heimdall` lists the
+  notes, `heimdall hola.txt` opens or creates one, `heimdall ls [filter]`
+  prints the titles and `heimdall rm <note>` moves one to the trash (it
+  always asks first). In the list, open a note by number or by title, with
+  Tab completion. No colors, a full-screen editor with find, undo and
+  cut/paste of lines. Secrets show as `[secret]` and `^R` shows the one at
+  the cursor, underlined. `^T` is code mode: line numbers, the app's
+  syntax colors, and a map of the file on the right that the mouse wheel
+  scrolls; a new note named like a source file (`backup.py`,
+  `index.html`, `main.c`) starts in it, with the language of its
+  extension. The password question is wiped from the terminal once the vault
+  opens. It asks for the password every time, waits for the USB key
+  if the vault needs one, and locks like the app (idle time, USB key
+  removed, sleep, closing the terminal), always saving encrypted first.
+  `--vault <path>` or `$HEIMDALL_VAULT` choose the vault; `--gui` opens the
+  window.
+- **One open copy of a vault at a time.** A vault that is open in a
+  Heimdall window can't be opened in a second window or in the terminal
+  until it is locked or closed there, so two copies can't overwrite each
+  other's changes. On Windows too.
+
+### Changed
+- **No two notes with the same title.** Renaming, importing or restoring a
+  note to a title that is taken gives it a number before the extension,
+  like Windows: `hola.txt` becomes `hola (2).txt`. Vaults that already have
+  repeated titles are fixed when they open; the note edited last keeps the
+  name. Imported duplicates used to get `main.rs (2)`; now `main (2).rs`.
+- Linux: in a terminal, plain `heimdall` is now the terminal mode; open the
+  window with `heimdall --gui` (the app menu entry does). The AppImage
+  still opens the window when run with nothing.
+- Building from source needs Rust 1.89 or newer.
+
 ## [1.2.2] - 2026-11-10
 
 ### Which file do I download?
@@ -349,6 +464,7 @@ First stable release.
 - Releases built by GitHub Actions with a statically linked C runtime,
   published with SHA-256 checksums and a build provenance attestation.
 
+[1.3.0]: https://github.com/Azki09/heimdall/releases/tag/v1.3.0
 [1.2.2]: https://github.com/Azki09/heimdall/releases/tag/v1.2.2
 [1.2.1]: https://github.com/Azki09/heimdall/releases/tag/v1.2.1
 [1.2.0]: https://github.com/Azki09/heimdall/releases/tag/v1.2.0

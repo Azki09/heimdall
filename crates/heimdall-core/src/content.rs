@@ -578,7 +578,90 @@ mod legacy {
     }
 }
 
+/// `wanted`, or the first of `wanted (2)`, `wanted (3)`… that `taken`
+/// doesn't reject. Like Windows, the number goes before the extension, so
+/// `main.rs` becomes `main (2).rs` and keeps its language (DESIGN §10.1).
+pub fn unique_title(wanted: &str, taken: impl Fn(&str) -> bool) -> String {
+    if !taken(wanted) {
+        return wanted.to_owned();
+    }
+    // An extension: a short last part after a dot, with no spaces.
+    let (stem, ext) = match wanted.rfind('.') {
+        Some(dot)
+            if dot > 0
+                && (1..=8).contains(&(wanted.len() - dot - 1))
+                && wanted[dot + 1..].chars().all(|c| c.is_ascii_alphanumeric()) =>
+        {
+            wanted.split_at(dot)
+        }
+        _ => (wanted, ""),
+    };
+    (2..)
+        .map(|n| format!("{stem} ({n}){ext}"))
+        .find(|candidate| !taken(candidate))
+        .expect("some number is free")
+}
+
 impl Content {
+    /// Whether an open note other than `except` shows `title` on its tab.
+    fn title_taken(&self, title: &str, except: Option<Uuid>) -> bool {
+        self.notes
+            .iter()
+            .any(|n| Some(n.id) != except && n.display_title() == title)
+    }
+
+    /// Renames a note. Two notes never share a title (DESIGN §10.1): if
+    /// another one has it, this one gets ` (2)`, ` (3)`… Returns false if
+    /// the note doesn't exist or already has that title.
+    pub fn rename_note(&mut self, id: Uuid, wanted: &str) -> bool {
+        let wanted = wanted.trim();
+        let title = match wanted {
+            "" => String::new(),
+            _ => unique_title(wanted, |t| self.title_taken(t, Some(id))),
+        };
+        match self.note_mut(id) {
+            Some(note) if note.title != title => {
+                note.title.zeroize();
+                note.title = title;
+                true
+            }
+            _ => false,
+        }
+    }
+
+    /// A title for a new note that no open note has.
+    pub fn free_title(&self, wanted: &str) -> String {
+        unique_title(wanted.trim(), |t| self.title_taken(t, None))
+    }
+
+    /// Gives every note with a title of its own a different one, for vaults
+    /// from before titles were unique: of the notes that share a title, the
+    /// one edited last keeps it and the others get ` (2)`, ` (3)`… Notes
+    /// named after their first line are left alone. Returns how many were
+    /// renamed.
+    pub fn dedupe_titles(&mut self) -> usize {
+        let mut order: Vec<usize> = (0..self.notes.len())
+            .filter(|&i| !self.notes[i].title.is_empty())
+            .collect();
+        // Newest first, so it is the one that keeps the name.
+        order.sort_by_key(|&i| std::cmp::Reverse(self.notes[i].modified));
+        let mut seen: Vec<Zeroizing<String>> = Vec::new();
+        let mut renamed = 0;
+        for i in order {
+            let current = Zeroizing::new(self.notes[i].title.clone());
+            if seen.iter().any(|t| **t == *current) {
+                let free = unique_title(&current, |t| {
+                    seen.iter().any(|s| **s == t) || self.notes.iter().any(|n| n.title == t)
+                });
+                self.notes[i].title.zeroize();
+                self.notes[i].title = free;
+                renamed += 1;
+            }
+            seen.push(Zeroizing::new(self.notes[i].title.clone()));
+        }
+        renamed
+    }
+
     /// A fresh vault: one empty tab (DESIGN §9, step 1).
     pub fn new(profile: Profile, now: Timestamp) -> Self {
         let note = Note::new(now);
@@ -657,7 +740,8 @@ impl Content {
 
     /// Adds `notes` as new tabs at the end (import, DESIGN §10.9): each gets
     /// a new id and leaves the trash, and a title that is already taken
-    /// gets " (2)", " (3)"… The first one becomes active. Returns the ids.
+    /// gets " (2)", " (3)"… before its extension ([`unique_title`]). The
+    /// first one becomes active. Returns the ids.
     pub fn import_notes(&mut self, notes: impl IntoIterator<Item = Note>) -> Vec<Uuid> {
         let mut taken: Vec<Zeroizing<String>> = self
             .notes
@@ -670,10 +754,7 @@ impl Content {
             note.deleted_at = None;
             let title = Zeroizing::new(note.display_title().to_owned());
             if !title.is_empty() && taken.iter().any(|t| **t == *title) {
-                let free = (2..)
-                    .map(|n| format!("{} ({n})", *title))
-                    .find(|c| !taken.iter().any(|t| **t == *c))
-                    .expect("some number is free");
+                let free = unique_title(&title, |c| taken.iter().any(|t| **t == c));
                 note.title.zeroize();
                 note.title = free;
             }
@@ -712,6 +793,13 @@ impl Content {
         };
         let mut note = self.trash.remove(pos);
         note.deleted_at = None;
+        if !note.title.is_empty() {
+            let free = self.free_title(&note.title);
+            if free != note.title {
+                note.title.zeroize();
+                note.title = free;
+            }
+        }
         self.notes.push(note);
         self.active_note = Some(id);
         true
@@ -764,7 +852,7 @@ impl Content {
     }
 
     pub(crate) fn from_padded_plaintext(plain: &[u8]) -> Result<Self> {
-        if plain.len() < 4 || plain.len() % PAD_BLOCK != 0 {
+        if plain.len() < 4 || !plain.len().is_multiple_of(PAD_BLOCK) {
             return Err(Error::BadContent);
         }
         let len = u32::from_le_bytes(plain[..4].try_into().expect("4 bytes")) as usize;
@@ -1210,5 +1298,68 @@ other"
         c.close_note(b, 1);
         assert_eq!(c.active_note, Some(d));
         assert_eq!(c.notes.iter().map(|n| n.id).collect::<Vec<_>>(), vec![a, d]);
+    }
+
+    #[test]
+    fn titles_get_a_number_like_windows() {
+        let taken = |t: &str| ["hola.txt", "hola (2).txt", "notas", ".env", "v1.2 final"].contains(&t);
+        assert_eq!(unique_title("libre", taken), "libre");
+        assert_eq!(unique_title("hola.txt", taken), "hola (3).txt");
+        assert_eq!(unique_title("notas", taken), "notas (2)");
+        // Not extensions: a leading dot, or a last part with spaces.
+        assert_eq!(unique_title(".env", taken), ".env (2)");
+        assert_eq!(unique_title("v1.2 final", taken), "v1.2 final (2)");
+    }
+
+    #[test]
+    fn renaming_never_makes_a_duplicate() {
+        let mut c = Content::new(Profile::Basic, 1);
+        let a = c.notes[0].id;
+        let b = c.new_note(2);
+        assert!(c.rename_note(a, "sync.ps1"));
+        assert!(c.rename_note(b, " sync.ps1 "));
+        assert_eq!(c.note(b).unwrap().title, "sync (2).ps1");
+        // Its own title is not a clash, and an empty title is always allowed.
+        assert!(!c.rename_note(b, "sync (2).ps1"));
+        assert!(c.rename_note(b, ""));
+        assert_eq!(c.free_title("sync.ps1"), "sync (2).ps1");
+    }
+
+    #[test]
+    fn old_duplicates_are_renamed_newest_keeps_the_name() {
+        let mut c = Content::new(Profile::Basic, 1);
+        c.notes.clear();
+        for (title, modified) in [
+            ("hola.txt", 10),
+            ("hola.txt", 30),
+            ("otra", 5),
+            ("hola.txt", 20),
+            ("", 1),
+            ("", 2),
+        ] {
+            let mut n = Note::new(modified);
+            n.title = title.into();
+            c.notes.push(n);
+        }
+        assert_eq!(c.dedupe_titles(), 2);
+        let titles: Vec<&str> = c.notes.iter().map(|n| n.title.as_str()).collect();
+        assert_eq!(
+            titles,
+            ["hola (3).txt", "hola.txt", "otra", "hola (2).txt", "", ""]
+        );
+        assert_eq!(c.dedupe_titles(), 0);
+    }
+
+    #[test]
+    fn restoring_from_the_trash_keeps_titles_unique() {
+        let mut c = Content::new(Profile::Basic, 1);
+        let a = c.notes[0].id;
+        c.rename_note(a, "lista");
+        c.note_mut(a).unwrap().body = "x".into();
+        c.close_note(a, 2);
+        let b = c.new_note(3);
+        c.rename_note(b, "lista");
+        assert!(c.restore_note(a));
+        assert_eq!(c.note(a).unwrap().title, "lista (2)");
     }
 }
