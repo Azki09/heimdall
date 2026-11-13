@@ -18,7 +18,7 @@ secrecy = "0.10"
 serde = { version = "1", features = ["derive"] }
 postcard = { version = "1", default-features = false, features = ["alloc"] }
 uuid = { version = "1", features = ["v4", "serde"] }
-bip39 = { version = "2", features = ["zeroize"] }
+bip39 = { version = "3", features = ["zeroize"] }
 thiserror = "2"
 
 [features]
