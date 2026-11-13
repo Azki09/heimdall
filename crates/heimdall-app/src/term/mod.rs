@@ -405,6 +405,8 @@ mod linux {
         let mut notice: Option<String> = None;
         // `-ls <filter>`: only the titles with this text, until `-ls`.
         let mut filter: Option<String> = None;
+        // The one-time hint (DESIGN §10.11), under the first list.
+        let mut hint = crate::tips::take_terminal_hint();
         loop {
             prompt::erase_rows();
             let all = entries(&session);
@@ -432,6 +434,11 @@ mod linux {
             }
             if let Some(text) = notice.take() {
                 prompt::say(&format!("[heimdall] {text}"));
+                prompt::say("");
+            }
+            if std::mem::take(&mut hint) {
+                prompt::say(" Tip: type a number or a title to open a note. In the editor ^S saves,");
+                prompt::say(" ^R reveals a secret, ^Q quits. ? shows help. (shown once)");
                 prompt::say("");
             }
             let titles: Vec<String> = all.iter().map(|e| e.label.clone()).collect();

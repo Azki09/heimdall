@@ -694,6 +694,17 @@ Todo se puede usar sin ratón. **No hay soporte para lector de pantalla**, a pro
 
 Las guías de indentación del modo código se quedan en `#2C2C2C`: van detrás del código, no alrededor de un control.
 
+### 10.11 Versión y tips de una sola vez (v1.3.2)
+
+Pedido del usuario el 2026-11-13 (mockup aprobado: versión bajo el logo y tips en el momento, no un tour al inicio).
+
+- **Versión.** Welcome y Unlock muestran `v{CARGO_PKG_VERSION}` bajo el logo (`widgets::version_label`, `TEXT_DIM`, 12 px). La terminal y *Settings → About* ya la mostraban.
+- **Tips.** Una tarjeta pequeña con flecha junto a lo que explica, la **primera vez** que se llega a esa función, y nunca más: título, texto, *Turn off tips · shown once* y **Got it**; `Esc` la cierra. Como mucho una a la vez. Cuenta como vista en cuanto aparece (aunque se cierre la app). Módulo `tips.rs`; lo visto va en `tips.txt` en la carpeta de configuración (una clave por línea, `off` si se apagaron), fuera de la bóveda: es por computadora. *Settings → About*: *Tips* (encendido) y *Show all tips again*.
+- **Cuándo sale cada uno:** `welcome` (Welcome sin bóvedas recientes, bajo *Create vault*), `profile` (paso del perfil, junto a Basic), `recovery` (junto a las 12 palabras, también al cambiar el código), `first-note` (bajo `+` la primera vez que se abre una bóveda), `selection` (texto seleccionado de 4 a 64 caracteres sin espacios, fuera del modo código: sugiere Ctrl+Shift+H; se cierra al marcarlo), `secret` (recién marcado un secreto, bajo el cursor; se cierra al escribir), `code-mode` (pestaña en modo código por su extensión, sobre el indicador del lenguaje), `export` (paso *Warning* de exportar a texto plano), `locked` (Unlock tras un bloqueo automático, no con Ctrl+L).
+- **Terminal, solo Linux** (única versión con terminal; en Windows se activa con la 1.4): `terminal` en la ventana, sobre la barra de estado, desde la **segunda** sesión (si `first-note` ya estaba visto al arrancar) y solo si la terminal no se ha usado; `terminal-hint`, una línea bajo la primera lista de notas de la terminal.
+- **Quien actualiza** (no hay `tips.txt` pero sí `recent.txt` o `terminal-vaults.txt`) arranca con `welcome`, `profile` y `recovery` vistos.
+- Los avisos que ya existían se quedan como estaban (tip de modo código en pestaña nueva, explicación del enmascarado al pegar, sugerir la extensión); los tips del editor no salen mientras alguno de ellos, un menú o un diálogo está abierto.
+
 ## 11. Funciones del editor relacionadas con seguridad
 
 Diseño cerrado el 2026-10-30 (v0.4).
@@ -819,7 +830,7 @@ Si una señal de D-Bus no llega (un contenedor sin logind, un escritorio mínimo
 | **v1.1** | YubiKey/FIDO2 |
 | **v1.0** | Formato congelado (§5.6), **menú contextual general** (clic derecho con Cut / Copy / Paste / Select all en cualquier parte del texto), copia de respaldo manual, exportar e importar, cifrado y en texto plano (§10.9) |
 | **v1.2** | Linux (§13.1) |
-| **v1.3** | Modo terminal sencillo, solo Linux (§17), y bloqueo exclusivo de la bóveda entre ventanas y terminal. La 1.3.1 trae lo que pidió el usuario tras probarla: elegir bóveda, límite de contraseñas incorrectas (§9.1), *Save as* y exportar, comandos en la lista y sugerir la extensión |
+| **v1.3** | Modo terminal sencillo, solo Linux (§17), y bloqueo exclusivo de la bóveda entre ventanas y terminal. La 1.3.1 trae lo que pidió el usuario tras probarla: elegir bóveda, límite de contraseñas incorrectas (§9.1), *Save as* y exportar, comandos en la lista y sugerir la extensión. La 1.3.2: versión bajo el logo y tips de una sola vez (§10.11) |
 | **v1.4** | Modo terminal en Windows: lo mismo que en Linux (diseño por decidir con el usuario; Windows necesita un ejecutable de consola aparte o adjuntar una consola) |
 | **v1.5** | Generador de contraseñas: inserta la contraseña directo como secreto `{*…*}`, sin pasar por el portapapeles |
 | **v2.0 — App completa** | Windows y Linux: menú lateral (el generador se muda ahí), etiquetas, notas fijadas, quizás historial de notas. Cambio de formato del contenido: decidir antes cómo se comporta una bóveda 2.0 abierta en 1.x |

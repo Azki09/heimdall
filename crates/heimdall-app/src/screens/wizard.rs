@@ -4,7 +4,7 @@
 
 use std::path::{Path, PathBuf};
 
-use eframe::egui::{self, pos2, vec2, Align2, CornerRadius, Sense, Stroke, StrokeKind, Ui};
+use eframe::egui::{self, pos2, vec2, Align2, CornerRadius, Rect, Sense, Stroke, StrokeKind, Ui};
 use heimdall_core::storage::{save_vault, SaveKind};
 use heimdall_core::{KdfParams, Keyfile, Profile, RecoveryCode, SecretString, Vault};
 
@@ -599,6 +599,14 @@ impl Wizard {
             let sense = if enabled { Sense::click() } else { Sense::hover() };
             let (rect, resp) = ui.allocate_exact_size(vec2(460.0, 86.0 + extra), sense);
             let selected = *profile == value;
+            if value == Profile::Basic {
+                crate::tips::show(
+                    ui.ctx(),
+                    crate::tips::Tip::Profile,
+                    rect,
+                    crate::tips::Side::Right,
+                );
+            }
             let painter = ui.painter();
             painter.rect(
                 rect,
@@ -743,7 +751,15 @@ impl Wizard {
         let clear_after =
             heimdall_core::content::SecuritySettings::defaults_for(self.profile()).clipboard_clear_s;
         let Some(code) = &self.code else { return };
+        let top = ui.cursor().min;
         keys::code_grid(ui, code, 460.0);
+        let grid = Rect::from_min_max(top, pos2(top.x + 460.0, ui.cursor().top()));
+        crate::tips::show(
+            ui.ctx(),
+            crate::tips::Tip::Recovery,
+            grid,
+            crate::tips::Side::Right,
+        );
         ui.add_space(14.0);
         self.code_actions.ui(ui, code, &vault, clear_after);
         ui.add_space(16.0);

@@ -20,6 +20,7 @@ mod support;
 #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 mod term;
 mod theme;
+mod tips;
 mod usb;
 mod vault_lock;
 mod widgets;

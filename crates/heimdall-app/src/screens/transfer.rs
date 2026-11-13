@@ -4,7 +4,7 @@
 
 use std::path::{Path, PathBuf};
 
-use eframe::egui::{self, vec2, Stroke, Ui};
+use eframe::egui::{self, pos2, vec2, Rect, Stroke, Ui};
 use heimdall_core::content::{Note, Profile, SecuritySettings};
 use heimdall_core::storage::{backup_path, write_atomic};
 use heimdall_core::{Error, Keyfile, LockedVault, RecoveryCode, SecretString, Vault};
@@ -1258,12 +1258,20 @@ impl Flow for ExportText {
     fn body(&mut self, ui: &mut Ui, _s: &Session) {
         match self.step {
             TextStep::Warning => {
+                let top = ui.cursor().min;
                 widgets::heading(ui, "Export as plain text");
                 ui.add_space(2.0);
                 widgets::paragraph(
                     ui,
                     "Plain text files are not encrypted. Anyone with access to this computer, its backups or its cloud sync can read them.",
                     COL,
+                );
+                let warning = Rect::from_min_max(top, pos2(top.x + COL, ui.cursor().top()));
+                crate::tips::show(
+                    ui.ctx(),
+                    crate::tips::Tip::Export,
+                    warning,
+                    crate::tips::Side::Right,
                 );
                 ui.add_space(20.0);
                 keys::bullet(

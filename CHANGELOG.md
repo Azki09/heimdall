@@ -4,6 +4,101 @@ All notable changes to Heimdall. Versions follow
 [Semantic Versioning](https://semver.org). Vaults created by any 1.x version
 keep opening in every later version (`docs/DESIGN.md` section 5.6).
 
+## [1.3.2] - 2026-11-13
+
+### Which file do I download?
+
+| Your system | File | Shows up in the app menu |
+|---|---|---|
+| Windows 10 / 11 (64-bit) | `heimdall.exe` | No installer, run the file |
+| Ubuntu, Debian, Mint (22.04 / 12 or newer) | `heimdall_1.3.2_amd64.deb` | Yes |
+| Any other Linux x86_64 (Fedora 36+, Arch, ...) | `heimdall-1.3.2-linux-x86_64.tar.gz` + `install.sh` | Yes |
+| Linux, portable (USB drive, no install) | `Heimdall-1.3.2-x86_64.AppImage` | No, run the file |
+
+`SHA256SUMS.txt` holds the hash of every file, to check your download.
+
+Vaults are the same as in 1.3.1: 1.3.1 and 1.3.2 open each other's vaults.
+
+### Install on Windows
+In PowerShell: download, verify and run `heimdall.exe` (no installer):
+
+```powershell
+cd $HOME\Downloads
+$base = "https://github.com/Azki09/heimdall/releases/download/v1.3.2"
+Invoke-WebRequest "$base/heimdall.exe" -OutFile heimdall.exe
+Invoke-WebRequest "$base/SHA256SUMS.txt" -OutFile SHA256SUMS.txt
+$expected = (Select-String 'heimdall\.exe$' SHA256SUMS.txt).Line.Split(' ')[0]
+if ((Get-FileHash heimdall.exe).Hash -eq $expected) { "OK" } else { "MISMATCH: do not run it" }
+gh attestation verify heimdall.exe -R Azki09/heimdall   # optional, needs the GitHub CLI
+.\heimdall.exe
+```
+
+The executable is not signed yet, so the first time Windows SmartScreen
+may show "Windows protected your PC". If the hash matched, choose
+**More info → Run anyway**.
+
+### Install on Linux
+First download the hash list:
+
+```sh
+cd ~/Downloads
+base=https://github.com/Azki09/heimdall/releases/download/v1.3.2
+curl -LO "$base/SHA256SUMS.txt"
+```
+
+**Ubuntu, Debian, Mint (.deb)**, for every user of the computer:
+
+```sh
+curl -LO "$base/heimdall_1.3.2_amd64.deb"
+sha256sum -c --ignore-missing SHA256SUMS.txt   # must say OK
+gh attestation verify heimdall_1.3.2_amd64.deb -R Azki09/heimdall   # optional
+sudo apt install ./heimdall_1.3.2_amd64.deb
+```
+
+Open it from the app menu, or with `heimdall --gui` from a terminal
+(plain `heimdall` in a terminal is the terminal mode). Remove: `sudo apt remove heimdall`.
+
+**Any distribution (.tar.gz + install.sh)**, only for you, without sudo:
+
+```sh
+curl -LO "$base/heimdall-1.3.2-linux-x86_64.tar.gz"
+sha256sum -c --ignore-missing SHA256SUMS.txt   # must say OK
+gh attestation verify heimdall-1.3.2-linux-x86_64.tar.gz -R Azki09/heimdall   # optional
+tar xzf heimdall-1.3.2-linux-x86_64.tar.gz
+./heimdall-1.3.2-linux-x86_64/install.sh
+```
+
+If it doesn't appear in the menu right away, log out and back in. Remove:
+`~/.local/share/heimdall/uninstall.sh`.
+
+**Portable (AppImage)**, nothing installed, not in the menu:
+
+```sh
+curl -LO "$base/Heimdall-1.3.2-x86_64.AppImage"
+sha256sum -c --ignore-missing SHA256SUMS.txt   # must say OK
+chmod +x Heimdall-1.3.2-x86_64.AppImage
+./Heimdall-1.3.2-x86_64.AppImage
+```
+
+AppImages need FUSE 2 (`sudo apt install libfuse2` on Ubuntu 22.04,
+`libfuse2t64` on 24.04).
+
+Removing Heimdall never deletes your vaults (`.heim` files).
+
+
+### Added
+- **Version under the logo.** The Welcome and unlock screens show the
+  version you are running (for example `v1.3.2`), so it's clear which
+  Heimdall is open.
+- **Tips, each shown once.** The first time you reach a feature, a small
+  card next to it explains it: creating a vault, the security profile, the
+  recovery code, the first note, a selection that looks like a password,
+  a new secret, code mode, exporting, and the first time the vault locks
+  by itself. Every tip shows only once. On Linux, a tip in the window says
+  the terminal mode exists, and the terminal shows a one-line hint the
+  first time. Turn tips off, or see them all again, in Settings → About.
+  Updating from 1.3.1 skips the tips about creating a vault.
+
 ## [1.3.1] - 2026-11-13
 
 ### Which file do I download?
@@ -601,6 +696,7 @@ First stable release.
 - Releases built by GitHub Actions with a statically linked C runtime,
   published with SHA-256 checksums and a build provenance attestation.
 
+[1.3.2]: https://github.com/Azki09/heimdall/releases/tag/v1.3.2
 [1.3.1]: https://github.com/Azki09/heimdall/releases/tag/v1.3.1
 [1.3.0]: https://github.com/Azki09/heimdall/releases/tag/v1.3.0
 [1.2.2]: https://github.com/Azki09/heimdall/releases/tag/v1.2.2

@@ -47,6 +47,13 @@ pub fn logo(ui: &mut Ui, font_size: f32) {
     }
 }
 
+/// The running version under the logo (Welcome, Unlock), so it's clear
+/// which Heimdall this is.
+pub fn version_label(ui: &mut Ui) {
+    ui.add_space(8.0);
+    label(ui, &format!("v{}", env!("CARGO_PKG_VERSION")), 12.0, TEXT_DIM);
+}
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum ButtonKind {
     Primary,

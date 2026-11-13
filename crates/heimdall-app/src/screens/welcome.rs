@@ -102,8 +102,11 @@ impl Welcome {
             30.0 + self.items.len() as f32 * 64.0 + 20.0
         };
         let hints_h = hints.len() as f32 * 44.0 + if hints.is_empty() { 0.0 } else { 14.0 };
-        screens::centered_column(ctx, 440.0, 150.0 + 44.0 + list_h + 42.0 + hints_h, |ui| {
-            ui.vertical_centered(|ui| widgets::logo(ui, 8.0));
+        screens::centered_column(ctx, 440.0, 150.0 + 26.0 + 44.0 + list_h + 42.0 + hints_h, |ui| {
+            ui.vertical_centered(|ui| {
+                widgets::logo(ui, 8.0);
+                widgets::version_label(ui);
+            });
             ui.add_space(44.0);
 
             if !self.items.is_empty() {
@@ -166,8 +169,17 @@ impl Welcome {
                 {
                     action = Some(Action::PickFile);
                 }
-                if widgets::button(ui, ButtonKind::Primary, "Create vault", true, vec2(215.0, 42.0)).clicked()
-                {
+                let create =
+                    widgets::button(ui, ButtonKind::Primary, "Create vault", true, vec2(215.0, 42.0));
+                if self.items.is_empty() {
+                    crate::tips::show(
+                        ctx,
+                        crate::tips::Tip::Welcome,
+                        create.rect,
+                        crate::tips::Side::Below,
+                    );
+                }
+                if create.clicked() {
                     action = Some(Action::Create);
                 }
             });

@@ -72,7 +72,7 @@ them. Set `version` to the number of the
 [latest release](https://github.com/Azki09/heimdall/releases/latest):
 
 ```sh
-version=1.3.1
+version=1.3.2
 base=https://github.com/Azki09/heimdall/releases/download/v$version
 cd ~/Downloads
 curl -LO "$base/SHA256SUMS.txt"

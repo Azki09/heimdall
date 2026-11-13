@@ -111,6 +111,14 @@ pub struct EditorState {
     offered: std::collections::HashSet<Uuid>,
     /// "Looks like Python code", with the name and extension to rename to.
     rename_hint: Option<RenameHint>,
+    /// For the one-time tips (DESIGN §10.11): the caret on screen, whether
+    /// the selection looks like a password, a secret was just marked, and
+    /// where `+` and the status bar are.
+    caret_rect: Option<Rect>,
+    password_like: bool,
+    new_secret: bool,
+    plus_rect: Option<Rect>,
+    status_left: Option<Rect>,
 }
 
 /// The card of [`offer_extension`]: both parts can be changed before
@@ -482,6 +490,7 @@ pub fn ui(ctx: &egui::Context, s: &mut Session, st: &mut EditorState, last_input
             vec2(32.0, chrome::TITLE_BAR_H),
         );
         new_tab_button(ui, s, st, plus);
+        st.plus_rect = Some(plus);
         tab_menu_button(ui, st, plus.right() + 2.0);
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             ui.add_space(8.0);
@@ -583,6 +592,7 @@ pub fn ui(ctx: &egui::Context, s: &mut Session, st: &mut EditorState, last_input
     }
     offer_extension(ctx, s, st, last_input);
     rename_hint(ctx, s, st);
+    editor_tips(ctx, s, st);
 
     if s.vault.content.active_note != active_before {
         s.view_changed = true;
@@ -1308,8 +1318,15 @@ fn text_area(ui: &mut Ui, s: &mut Session, st: &mut EditorState) {
     }
 
     let has_focus = ctx.memory(|m| m.has_focus(id));
+    st.caret_rect = None;
+    st.password_like = false;
     if std::mem::take(&mut st.mark_secret) {
-        inserted |= mark_secret(&ctx, id, note, st);
+        let marked = mark_secret(&ctx, id, note, st);
+        if marked {
+            st.new_secret = true;
+            crate::tips::close(crate::tips::Tip::Selection);
+        }
+        inserted |= marked;
     }
     if has_focus {
         let before = secrets::items(&note.body, &is_revealed);
@@ -1741,6 +1758,12 @@ fn text_area(ui: &mut Ui, s: &mut Session, st: &mut EditorState) {
                 .pos_from_cursor(&range.primary)
                 .translate(output.galley_pos.to_vec2());
             let caret = Rect::from_min_size(row.min, vec2(0.0, glyph_h));
+            st.caret_rect = Some(caret);
+            let (a, b) = (key.0.min(key.1), key.0.max(key.1));
+            st.password_like = a != b && !code_mode && {
+                let picked: String = note.body.chars().skip(a).take(b - a).collect();
+                looks_like_password(&picked)
+            };
             egui::text_selection::visuals::paint_text_cursor(
                 ui,
                 &ui.painter_at(viewport),
@@ -1755,6 +1778,9 @@ fn text_area(ui: &mut Ui, s: &mut Session, st: &mut EditorState) {
             s.view_changed = true;
         }
         st.line_col = line_col(&note.body, idx);
+    }
+    if output.response.changed() {
+        st.new_secret = false;
     }
     if output.response.changed() || inserted {
         note.modified = heimdall_core::content::now();
@@ -2385,6 +2411,7 @@ fn status_bar(ctx: &egui::Context, s: &Session, st: &mut EditorState, last_input
     let show = s.vault.content.editor.status_bar;
     let notice = s.current_notice();
     st.zones.status = None;
+    st.status_left = None;
     if !show && s.save_error.is_none() && notice.is_none() {
         return;
     }
@@ -2403,6 +2430,7 @@ fn status_bar(ctx: &egui::Context, s: &Session, st: &mut EditorState, last_input
         .show_separator_line(false)
         .show(ctx, |ui| {
             let r = ui.max_rect();
+            st.status_left = Some(Rect::from_min_size(r.min, vec2(110.0, r.height())));
             ui.painter().hline(
                 r.x_range().expand(16.0),
                 r.top(),
@@ -2467,6 +2495,63 @@ fn status_bar(ctx: &egui::Context, s: &Session, st: &mut EditorState, last_input
                 });
             });
         });
+}
+
+/// One token that could be a password or a PIN: no spaces, 4 to 64
+/// characters, no secret in it already.
+fn looks_like_password(text: &str) -> bool {
+    let n = text.chars().count();
+    (4..=64).contains(&n) && !text.chars().any(char::is_whitespace) && !text.contains(secret::OPEN)
+}
+
+/// The one-time tips of the editor (DESIGN §10.11), at most one at a time
+/// and never over a menu, a dialog or another card.
+fn editor_tips(ctx: &egui::Context, s: &Session, st: &mut EditorState) {
+    use crate::tips::{self, Side, Tip};
+    let busy = st.tip.is_some()
+        || st.rename_hint.is_some()
+        || st.secret_menu.is_some()
+        || st.secret_edit.is_some()
+        || st.spell_menu.is_some()
+        || st.picker.is_some()
+        || st.tab_menu.is_some()
+        || st.tab_context.is_some()
+        || st.reveal_check.is_some()
+        || st.find_all.is_some();
+    if busy {
+        return;
+    }
+    if st.new_secret {
+        if let Some(c) = st.caret_rect {
+            tips::show(ctx, Tip::Secret, c, Side::Below);
+        }
+    }
+    if st.password_like {
+        if let Some(c) = st.caret_rect {
+            tips::show(ctx, Tip::Selection, c, Side::Below);
+        }
+    }
+    let note = s
+        .vault
+        .content
+        .active_note
+        .and_then(|id| s.vault.content.note(id));
+    let status_bar = s.vault.content.editor.status_bar;
+    if let (Some(note), true, Some(r)) = (note, status_bar, st.language_button) {
+        if note.code.is_some() && code::by_title(&note.title).is_some() {
+            tips::show(ctx, Tip::CodeMode, r, Side::Above);
+        }
+    }
+    if let Some(r) = st.plus_rect {
+        tips::show(ctx, Tip::FirstNote, r, Side::Below);
+    }
+    // The terminal mode is Linux only for now (DESIGN §17); from the
+    // second time a vault opens, so it doesn't pile up with the first.
+    if cfg!(target_os = "linux") && tips::seen_before(Tip::FirstNote) && !tips::seen(Tip::TerminalHint) {
+        if let (true, Some(r)) = (status_bar, st.status_left) {
+            tips::show(ctx, Tip::Terminal, r, Side::Above);
+        }
+    }
 }
 
 /// "Rust" / "Plain text" in the status bar; opens the language picker.

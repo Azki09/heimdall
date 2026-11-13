@@ -392,6 +392,7 @@ impl HeimdallApp {
         self.editor = EditorState::default();
         wipe_ui_memory(ctx);
 
+        let auto = !matches!(reason, LockReason::Manual);
         let reason = match reason {
             LockReason::Manual => "Locked".to_owned(),
             LockReason::Inactivity(s) => {
@@ -403,7 +404,14 @@ impl HeimdallApp {
             LockReason::WindowsLocked => "Locked when the session was locked".to_owned(),
             LockReason::Suspended => "Locked before the computer went to sleep".to_owned(),
         };
-        self.screen = Screen::Unlock(Box::new(Unlock::new(path, Some(LockInfo { reason, saved_at }))));
+        self.screen = Screen::Unlock(Box::new(Unlock::new(
+            path,
+            Some(LockInfo {
+                reason,
+                saved_at,
+                auto,
+            }),
+        )));
     }
 
     fn auto_lock(&mut self, ctx: &egui::Context) -> Option<LockReason> {

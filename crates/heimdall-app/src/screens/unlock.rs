@@ -20,6 +20,8 @@ use crate::{chrome, screens};
 pub struct LockInfo {
     pub reason: String,
     pub saved_at: Option<String>,
+    /// Locked by itself (idle, USB, sleep...), not by the person.
+    pub auto: bool,
 }
 
 /// The unlocked vault, and the USB key it was opened with.
@@ -231,10 +233,11 @@ impl Unlock {
         screens::centered_column(
             ctx,
             340.0,
-            200.0 + info_h + 30.0 + field_h + key_h + 150.0 + if wait_note.is_some() { 17.0 } else { 0.0 },
+            226.0 + info_h + 30.0 + field_h + key_h + 150.0 + if wait_note.is_some() { 17.0 } else { 0.0 },
             |ui| {
                 ui.vertical_centered(|ui| {
                     widgets::logo(ui, 6.0);
+                    widgets::version_label(ui);
                     ui.add_space(14.0);
                     ui.label(
                         egui::RichText::new(file_name(&self.path))
@@ -290,6 +293,16 @@ impl Unlock {
                     );
                     if std::mem::take(&mut self.focus_pending) {
                         resp.request_focus();
+                    }
+                    if self.info.as_ref().is_some_and(|i| i.auto) {
+                        crate::tips::show(
+                            ui.ctx(),
+                            crate::tips::Tip::Locked,
+                            // The response is the text part; the field, eye
+                            // included, is 340 wide.
+                            egui::Rect::from_min_size(resp.rect.min, vec2(340.0, resp.rect.height())),
+                            crate::tips::Side::Right,
+                        );
                     }
                     resp.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter))
                 };

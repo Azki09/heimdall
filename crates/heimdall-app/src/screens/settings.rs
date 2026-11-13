@@ -1252,6 +1252,30 @@ fn about(ui: &mut Ui) {
         "Heimdall never connects to the network. Check the repository for new releases and update manually.",
         None,
     );
+    let mut tips_on = crate::tips::enabled();
+    setting_row(
+        ui,
+        "Tips",
+        Some((
+            "A short note the first time you reach a feature. Each one shows once.",
+            TEXT_MUTED,
+        )),
+        |ui| {
+            if widgets::toggle(ui, &mut tips_on).changed() {
+                crate::tips::set_enabled(tips_on);
+            }
+        },
+    );
+    setting_row(
+        ui,
+        "Show all tips again",
+        Some(("Every tip shows once more, as if Heimdall were new.", TEXT_MUTED)),
+        |ui| {
+            if widgets::button(ui, ButtonKind::Secondary, "Show again", true, vec2(0.0, 32.0)).clicked() {
+                crate::tips::reset();
+            }
+        },
+    );
     link_row(
         ui,
         "Encryption",
