@@ -14,8 +14,12 @@ pub enum Command {
     Ls(Option<String>),
     /// `heimdall rm <note>`
     Rm(String),
+    /// `heimdall forget <vault>`
+    Forget(String),
     Help,
     Version,
+    /// Not in `--help` on purpose (see `hto.rs`).
+    Hto,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -66,6 +70,7 @@ pub fn parse(args: Vec<OsString>, terminal: bool, appimage: bool) -> Parsed {
             "--gui" => return Parsed::Gui,
             "-h" | "--help" => command = Some(Command::Help),
             "-V" | "--version" => command = command.or(Some(Command::Version)),
+            "-HTO" => command = command.or(Some(Command::Hto)),
             "-v" | "--vault" => match args.next() {
                 Some(path) if !path.is_empty() => vault = Some(PathBuf::from(path)),
                 _ => return Parsed::Usage("--vault needs the path of a .heim file.".into()),
@@ -90,6 +95,12 @@ pub fn parse(args: Vec<OsString>, terminal: bool, appimage: bool) -> Parsed {
                 return Parsed::Usage("rm needs the title of a note.".into());
             }
             Command::Rm(rest.join(" "))
+        }
+        Some((first, rest)) if !first_is_literal && first == "forget" => {
+            if rest.is_empty() {
+                return Parsed::Usage("forget needs the name or path of a vault.".into());
+            }
+            Command::Forget(rest.join(" "))
         }
         Some(_) => Command::Open(words.join(" ")),
     };
@@ -131,8 +142,16 @@ mod tests {
         assert_eq!(p(&["ls", "banco"], true), run(Command::Ls(Some("banco".into()))));
         assert_eq!(p(&["rm", "recetas"], true), run(Command::Rm("recetas".into())));
         assert!(matches!(p(&["rm"], true), Parsed::Usage(_)));
+        assert_eq!(
+            p(&["forget", "trabajo"], true),
+            run(Command::Forget("trabajo".into()))
+        );
+        assert!(matches!(p(&["forget"], true), Parsed::Usage(_)));
+        assert_eq!(p(&["--", "forget"], true), run(Command::Open("forget".into())));
         assert_eq!(p(&["--help"], false), run(Command::Help));
         assert_eq!(p(&["-V"], false), run(Command::Version));
+        assert_eq!(p(&["-HTO"], true), run(Command::Hto));
+        assert!(matches!(p(&["-hto"], true), Parsed::Usage(_)));
         assert!(matches!(p(&["--frobnicate"], true), Parsed::Usage(_)));
     }
 

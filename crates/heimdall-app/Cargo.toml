@@ -40,7 +40,9 @@ winresource = "0.1"
 # Wayland clipboards that speak wlr-data-control; others go through X11.
 [target.'cfg(target_os = "linux")'.dependencies]
 arboard = { version = "3", default-features = false, features = ["wayland-data-control"] }
-crossterm = { version = "0.29", default-features = false, features = ["bracketed-paste", "events"] }
+# "use-dev-tty": crossterm's other reader, which stops when the terminal
+# goes away; the default one spins forever on a closed terminal.
+crossterm = { version = "0.29", default-features = false, features = ["bracketed-paste", "events", "use-dev-tty"] }
 signal-hook = { version = "0.3", default-features = false }
 
 [lints]

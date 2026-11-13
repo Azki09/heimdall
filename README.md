@@ -72,7 +72,7 @@ them. Set `version` to the number of the
 [latest release](https://github.com/Azki09/heimdall/releases/latest):
 
 ```sh
-version=1.3.0
+version=1.3.1
 base=https://github.com/Azki09/heimdall/releases/download/v$version
 cd ~/Downloads
 curl -LO "$base/SHA256SUMS.txt"
@@ -188,6 +188,7 @@ Everything works without a mouse. The full list is in *Settings → Shortcuts*.
 | Next / previous tab | `Ctrl+Tab` / `Ctrl+Shift+Tab` |
 | Go to tab 1–8 / last | `Ctrl+1…8` / `Ctrl+9` |
 | All tabs, export and import | `Ctrl+Shift+E` |
+| Export this tab as plain text | `Ctrl+Shift+S` |
 | Save / lock | `Ctrl+S` / `Ctrl+L` |
 | Settings | `Ctrl+,` |
 | Find in note / in all notes | `Ctrl+F` / `Ctrl+Shift+F` |
@@ -212,22 +213,33 @@ heimdall                 # unlock, list the notes, pick one by number or title
 heimdall hola.txt        # open the note "hola.txt" (created when you save)
 heimdall ls [filter]     # print the titles, one per line
 heimdall rm hola.txt     # move a note to the trash (asks first)
+heimdall forget trabajo  # stop remembering a vault in the terminal
 heimdall --gui           # open the window instead
 ```
 
 It asks for the vault password every time, like `sudo`, and for the USB key
-if the vault needs one. It uses the vault you opened last; choose another
-with `--vault <path>` or `$HEIMDALL_VAULT` (Hardened and Paranoid vaults
-are never remembered, so they need it).
+if the vault needs one. With several vaults remembered, `heimdall` lists
+them first (Enter opens the last one, `p` asks for another path, `q`
+quits); the other
+commands use the vault you opened last. `--vault <path>` or
+`$HEIMDALL_VAULT` choose one. Hardened and Paranoid vaults are not
+remembered; open one with `--vault` and the terminal offers to remember it
+(only for the terminal, until `heimdall forget`).
 
 In the editor: `^S` save, `^Q` quit, `^F` find, `^Z` undo, `^G` help
-(`^S` means Ctrl+S). A secret shows as `[secret]`; put the cursor on it and
+(`^S` means Ctrl+S). `^O` renames the note (it stays in the vault,
+encrypted) and `^E` writes it to a normal file, **not encrypted**, to run or
+compile it (off in Paranoid vaults until you allow it in Settings → Vault). A secret shows as `[secret]`; put the cursor on it and
 press `^R` to see or edit it (it shows underlined). `^T` turns on code
 mode for the note: line numbers, the app's colors, and a small map of the
-file on the right that the mouse wheel scrolls. A new note named like a
-source file (`backup.py`, `index.html`, `main.c`) starts in code mode, with
-its language taken from the extension. In the list of notes, Tab
-completes the title you are typing. The vault locks by itself exactly as in the
+file on the right that the mouse wheel scrolls. A note named like a
+source file (`backup.py`, `notes.md`, `main.c`) opens in code mode, with
+its language taken from the extension; turn it off with `^T` and it stays
+off for that note. If a note's title has no extension and its text looks
+like code, saving it suggests one (`tets` → `tets.py`, with `^O`); it never
+turns code mode on by itself. In the list of notes, Tab completes the title
+you are typing, and `-n title`, `-rm 3`, `-mv 3`, `-ls filter` and `-lock` work on the
+notes without leaving the vault (`?` lists them). The vault locks by itself exactly as in the
 app (idle time, USB key removed, sleep), saving first. Nothing is ever
 written to disk unencrypted, and the note doesn't stay in the terminal's
 scrollback.
@@ -235,8 +247,13 @@ scrollback.
 A vault is open in one place at a time: while it is open in the window, the
 terminal refuses it, and the other way round. Lock or close it there first.
 
-Terminal mode is small on purpose: settings, access, export and everything
-new are in the app. From the AppImage, run it with a note or a command
+After too many wrong passwords the vault waits before the next try (5
+tries and 5 minutes in Basic, longer in Hardened and Paranoid; change it in
+Settings → Security). Changing the computer's clock doesn't shorten the
+wait.
+
+Terminal mode is small on purpose: settings, access and everything new are
+in the app. From the AppImage, run it with a note or a command
 (`./Heimdall-*.AppImage hola.txt`); with nothing, the AppImage opens the
 window.
 
@@ -249,6 +266,7 @@ From the `⌄` menu next to the tabs:
   vault.
 - **Import notes from vault…** copies notes from another `.heim`.
 - **Export as plain text…** writes notes as `.txt` (or a `.zip` for several).
+  The **Export** button at the top right (Ctrl+Shift+S) does it for the open tab.
   These files are **not encrypted**, so Heimdall asks first.
 - **Import text files…** turns `.txt`, `.md` or code files into notes. The
   original files stay on disk unencrypted; delete them yourself if needed.

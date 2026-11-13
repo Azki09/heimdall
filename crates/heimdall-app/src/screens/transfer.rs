@@ -341,6 +341,11 @@ impl Transfer {
         Self::Text(Box::new(ExportText::new(s)))
     }
 
+    /// The Export button of the tab bar: only this tab, no list of notes.
+    pub fn export_tab(s: &Session, id: Uuid) -> Self {
+        Self::Text(Box::new(ExportText::one(s, id)))
+    }
+
     /// "Import notes from vault…" from `path` (already chosen).
     pub fn import_vault(path: PathBuf) -> Self {
         Self::Import(Box::new(ImportVault::new(path)))
@@ -1043,9 +1048,40 @@ pub struct ExportText {
     error: Option<String>,
     /// Where to save, while being asked.
     prompt: Option<PathPrompt>,
+    /// From the Export button: this tab only, shown by this title.
+    single: Option<(Uuid, String)>,
 }
 
 impl ExportText {
+    fn one(s: &Session, id: Uuid) -> Self {
+        let mut export = Self::new(s);
+        export.picks = picks(&s.vault.content.notes, |n| n.id == id);
+        let shown = s
+            .vault
+            .content
+            .note(id)
+            .map(|n| heimdall_core::secret::hide(n.display_title()))
+            .unwrap_or_default();
+        export.single = Some((id, shown));
+        export
+    }
+
+    /// The step after the warning (and the password): for one note
+    /// without secrets there is nothing to choose, so straight to saving.
+    fn after_warning(&mut self, s: &mut Session) -> Option<Action> {
+        self.step = TextStep::Notes;
+        let plain = self.single.as_ref().is_some_and(|(id, _)| {
+            s.vault
+                .content
+                .note(*id)
+                .is_some_and(|n| heimdall_core::secret::scan(&n.body).secrets.is_empty())
+        });
+        if plain {
+            return self.export(s);
+        }
+        None
+    }
+
     fn new(s: &Session) -> Self {
         let content = &s.vault.content;
         let active = content.active_note;
@@ -1057,6 +1093,7 @@ impl ExportText {
             secrets: Secrets::Hide,
             error: None,
             prompt: None,
+            single: None,
         }
     }
 
@@ -1085,7 +1122,7 @@ impl ExportText {
                 Outcome::Confirmed => {
                     self.gate = None;
                     self.needs_password = false;
-                    self.step = TextStep::Notes;
+                    action = self.after_warning(s).or(action);
                 }
             }
         }
@@ -1208,7 +1245,10 @@ impl Flow for ExportText {
     }
 
     fn steps(&self) -> Vec<&'static str> {
-        vec!["Warning", "Notes"]
+        match self.single {
+            Some(_) => vec!["Warning", "Secrets"],
+            None => vec!["Warning", "Notes"],
+        }
     }
 
     fn current(&self) -> usize {
@@ -1238,16 +1278,27 @@ impl Flow for ExportText {
                 );
             }
             TextStep::Notes => {
-                widgets::heading(ui, "Choose notes to export");
-                ui.add_space(2.0);
-                widgets::paragraph(
-                    ui,
-                    "One note is saved as a text file; several, as a .zip with one file per note.",
-                    COL,
-                );
-                ui.add_space(24.0);
-                note_list(ui, &mut self.picks);
-                ui.add_space(28.0);
+                if let Some((_, shown)) = &self.single {
+                    widgets::heading(ui, &format!("Export \"{shown}\""));
+                    ui.add_space(2.0);
+                    widgets::paragraph(
+                        ui,
+                        "This note has masked secrets. How should the file show them?",
+                        COL,
+                    );
+                    ui.add_space(24.0);
+                } else {
+                    widgets::heading(ui, "Choose notes to export");
+                    ui.add_space(2.0);
+                    widgets::paragraph(
+                        ui,
+                        "One note is saved as a text file; several, as a .zip with one file per note.",
+                        COL,
+                    );
+                    ui.add_space(24.0);
+                    note_list(ui, &mut self.picks);
+                    ui.add_space(28.0);
+                }
                 widgets::label(ui, "Masked secrets", 12.0, TEXT_MUTED);
                 ui.add_space(10.0);
                 for (value, title, description) in [
@@ -1280,7 +1331,7 @@ impl Flow for ExportText {
                     if self.needs_password {
                         self.gate = Some(password_gate());
                     } else {
-                        self.step = TextStep::Notes;
+                        return self.after_warning(s);
                     }
                 }
             }

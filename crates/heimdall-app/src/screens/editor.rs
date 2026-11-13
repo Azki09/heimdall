@@ -104,6 +104,22 @@ pub struct EditorState {
     copied: Option<(Pos2, f64, u32)>,
     /// Tabs scrolled out of the tab bar (all or in part); `⌄` lists them.
     hidden_tabs: Vec<Uuid>,
+    /// The tab, text length, edit time and save last looked at: a change
+    /// is looked at again once typing pauses (DESIGN §10.6).
+    seen_text: Option<(Uuid, usize, i64, Option<i64>)>,
+    /// Tabs already offered a name this session (DESIGN §10.6).
+    offered: std::collections::HashSet<Uuid>,
+    /// "Looks like Python code", with the name and extension to rename to.
+    rename_hint: Option<RenameHint>,
+}
+
+/// The card of [`offer_extension`]: both parts can be changed before
+/// renaming, in case the guess is wrong.
+struct RenameHint {
+    id: Uuid,
+    language: &'static str,
+    stem: String,
+    ext: String,
 }
 
 /// The tab bar's and status bar's controls, so F6 can move the focus
@@ -420,9 +436,18 @@ pub fn ui(ctx: &egui::Context, s: &mut Session, st: &mut EditorState, last_input
     if s.vault.content.active_note.is_none() {
         s.vault.content.active_note = s.vault.content.notes.first().map(|n| n.id);
     }
+    // A tab named like a source file turns to code mode (DESIGN §10.6).
+    let auto = s.vault.content.editor.code_from_extension;
+    let mut turned_on = false;
+    for note in &mut s.vault.content.notes {
+        turned_on |= code::auto_code(note, auto);
+    }
+    if turned_on {
+        s.touch(None);
+    }
 
     chrome::title_bar(ctx, |ui| {
-        let right_w = 200.0;
+        let right_w = 270.0;
         let bar = ui.max_rect();
         let avail = (bar.width() - right_w).max(120.0);
         // Tabs that don't fit scroll. `+` comes right after the last tab,
@@ -469,6 +494,16 @@ pub fn ui(ctx: &egui::Context, s: &mut Session, st: &mut EditorState, last_input
             ui.add_space(4.0);
             if chrome_button(ui, "Settings", false).clicked() {
                 action = Some(Action::Settings);
+            }
+            ui.add_space(4.0);
+            // Always here, for whichever tab is open (DESIGN §10.9).
+            if let Some(id) = s.vault.content.active_note {
+                if chrome_button(ui, "Export", false)
+                    .on_hover_text("Export this tab as plain text (Ctrl+Shift+S)")
+                    .clicked()
+                {
+                    action = Some(Action::ExportTab(id));
+                }
             }
         });
     });
@@ -546,6 +581,8 @@ pub fn ui(ctx: &egui::Context, s: &mut Session, st: &mut EditorState, last_input
     if let Some(a) = code_tip(ctx, s, st) {
         action = Some(a);
     }
+    offer_extension(ctx, s, st, last_input);
+    rename_hint(ctx, s, st);
 
     if s.vault.content.active_note != active_before {
         s.view_changed = true;
@@ -685,6 +722,8 @@ fn shortcuts(ctx: &egui::Context, s: &mut Session, st: &mut EditorState) -> Opti
                         language: String::new(),
                     }),
                 };
+                // Off by hand: the title's extension doesn't turn it on again.
+                n.code_off = n.code.is_none();
                 n.wrap = None;
                 st.tip = None;
                 st.picker = None;
@@ -716,7 +755,10 @@ fn shortcuts(ctx: &egui::Context, s: &mut Session, st: &mut EditorState) -> Opti
                 changed = true;
             }
         }
-        if press(i, cmd, Key::S) {
+        // Before Ctrl+S: press() ignores an extra Shift.
+        if press(i, cmd_shift, Key::S) {
+            action = Some(ExportTab);
+        } else if press(i, cmd, Key::S) {
             action = Some(Save);
         }
         if press(i, cmd, Key::L) {
@@ -836,12 +878,14 @@ fn shortcuts(ctx: &egui::Context, s: &mut Session, st: &mut EditorState) -> Opti
         }
         Some(Lock) => Some(Action::Lock(LockReason::Manual)),
         Some(OpenSettings) => Some(Action::Settings),
+        Some(ExportTab) => s.vault.content.active_note.map(Action::ExportTab),
         None => None,
     }
 }
 
 enum Shortcut {
     Save,
+    ExportTab,
     Lock,
     OpenSettings,
 }
@@ -1045,6 +1089,10 @@ fn tabs(ui: &mut Ui, s: &mut Session, st: &mut EditorState, avail: f32) {
             if content.rename_note(id, &text) {
                 if let Some(n) = content.note_mut(id) {
                     n.modified = now;
+                    // A new name like `x.py` is a new reason for code mode.
+                    if code::by_title(&n.title).is_some() {
+                        n.code_off = false;
+                    }
                 }
                 changed_note = Some(id);
             }
@@ -2642,6 +2690,7 @@ fn language_picker(ctx: &egui::Context, s: &mut Session, st: &mut EditorState) {
             };
             if was_code != note.code.is_some() {
                 note.wrap = None;
+                note.code_off = note.code.is_none();
             }
             s.touch(None);
         }
@@ -3550,6 +3599,220 @@ fn code_tip(ctx: &egui::Context, s: &mut Session, st: &mut EditorState) -> Optio
         ctx.request_repaint();
     }
     action
+}
+
+/// How long typing must pause before the text is looked at.
+const OFFER_PAUSE: std::time::Duration = std::time::Duration::from_millis(1500);
+
+/// A tab without an extension whose text looks like code is offered a
+/// name like `tets.py`: once typing or a paste pauses, or after a save.
+/// Once per tab while the vault is open (DESIGN §10.6). Only offered:
+/// code mode stays as it is unless the tab is renamed.
+fn offer_extension(ctx: &egui::Context, s: &Session, st: &mut EditorState, last_input: Instant) {
+    let content = &s.vault.content;
+    let Some(note) = content.active_note.and_then(|id| content.note(id)) else {
+        return;
+    };
+    let now_seen = Some((note.id, note.body.len(), note.modified, s.last_saved));
+    if st.seen_text == now_seen || st.offered.contains(&note.id) {
+        return;
+    }
+    let saved = st
+        .seen_text
+        .is_some_and(|(id, _, _, saved)| id == note.id && saved != s.last_saved);
+    let waited = last_input.elapsed();
+    if !saved && waited < OFFER_PAUSE {
+        ctx.request_repaint_after(OFFER_PAUSE - waited);
+        return;
+    }
+    st.seen_text = now_seen;
+    if let Some((stem, language)) = code::code_offer(note) {
+        st.offered.insert(note.id);
+        st.rename_hint = Some(RenameHint {
+            id: note.id,
+            language: language.name,
+            stem,
+            ext: language.extension().unwrap_or_default().to_owned(),
+        });
+    }
+}
+
+/// A small text box of the rename card.
+fn hint_field(ui: &mut Ui, id: egui::Id, text: &mut String, width: f32) -> egui::Response {
+    let (rect, _) = ui.allocate_exact_size(vec2(width, 28.0), Sense::hover());
+    let focused = ui.ctx().memory(|m| m.has_focus(id));
+    ui.painter().rect(
+        rect,
+        CornerRadius::same(5),
+        SURFACE,
+        Stroke::new(1.0_f32, if focused { BORDER_FOCUS } else { BORDER }),
+        egui::StrokeKind::Inside,
+    );
+    let mut child = ui.new_child(
+        egui::UiBuilder::new()
+            .max_rect(rect.shrink2(vec2(8.0, 0.0)))
+            .layout(egui::Layout::left_to_right(egui::Align::Center)),
+    );
+    child.add(
+        egui::TextEdit::singleline(text)
+            .id(id)
+            .frame(false)
+            .font(crate::theme::ui(13.0))
+            .text_color(TEXT)
+            .desired_width(width - 16.0),
+    )
+}
+
+/// The extension typed in the card: letters and digits, up to 10.
+fn clean_ext(ext: &str) -> Option<&str> {
+    let ext = ext.trim().trim_start_matches('.');
+    ((1..=10).contains(&ext.len()) && ext.bytes().all(|c| c.is_ascii_alphanumeric())).then_some(ext)
+}
+
+/// The offer of [`offer_extension`], bottom right like the code mode tip.
+/// Gone once answered, or when another tab is chosen.
+fn rename_hint(ctx: &egui::Context, s: &mut Session, st: &mut EditorState) {
+    let Some(hint) = st.rename_hint.as_mut() else {
+        return;
+    };
+    let id = hint.id;
+    let Some(note) = s
+        .vault
+        .content
+        .note(id)
+        .filter(|_| s.vault.content.active_note == Some(id))
+    else {
+        st.rename_hint = None;
+        return;
+    };
+    if st.tip.is_some() {
+        return;
+    }
+    let language = hint.language;
+    let turns_on = note.code.is_none() && s.vault.content.editor.code_from_extension;
+    let line = match (turns_on, note.title.trim().is_empty()) {
+        (true, true) => "Give this tab a name to save it with the right extension. Code mode turns on.",
+        (true, false) => "Rename this tab so exported files get the right extension. Code mode turns on.",
+        (false, true) => "Give this tab a name to save it with the right extension.",
+        (false, false) => "Rename this tab so exported files get the right extension.",
+    };
+    let can_rename = !hint.stem.trim().is_empty() && clean_ext(&hint.ext).is_some();
+    let bottom = if s.vault.content.editor.status_bar {
+        50.0
+    } else {
+        20.0
+    };
+    let (mut rename, mut dismiss) = (false, false);
+    egui::Area::new(egui::Id::new("rename_hint"))
+        .order(egui::Order::Foreground)
+        .anchor(Align2::RIGHT_BOTTOM, vec2(-20.0, -bottom))
+        .show(ctx, |ui| {
+            egui::Frame::NONE
+                .fill(POPUP)
+                .stroke(Stroke::new(1.0_f32, POPUP_BORDER))
+                .corner_radius(CornerRadius::same(8))
+                .inner_margin(egui::Margin {
+                    left: 16,
+                    right: 16,
+                    top: 14,
+                    bottom: 14,
+                })
+                .shadow(egui::Shadow {
+                    offset: [0, 8],
+                    blur: 24,
+                    spread: 0,
+                    color: egui::Color32::from_black_alpha(90),
+                })
+                .show(ui, |ui| {
+                    ui.set_width(306.0);
+                    ui.spacing_mut().item_spacing = vec2(8.0, 4.0);
+                    ui.horizontal_top(|ui| {
+                        ui.vertical(|ui| {
+                            ui.set_width(270.0);
+                            ui.label(
+                                egui::RichText::new(format!("Looks like {language} code"))
+                                    .font(medium(13.0))
+                                    .color(TEXT),
+                            );
+                            ui.add(
+                                egui::Label::new(
+                                    egui::RichText::new(line)
+                                        .font(crate::theme::ui(12.0))
+                                        .color(TEXT_MUTED),
+                                )
+                                .wrap(),
+                            );
+                        });
+                        let (r, resp) = ui.allocate_exact_size(vec2(24.0, 24.0), Sense::click());
+                        let r = r.translate(vec2(6.0, -4.0));
+                        if resp.hovered() {
+                            ui.painter().rect_filled(r, CornerRadius::same(4), BORDER);
+                            ui.ctx().set_cursor_icon(CursorIcon::PointingHand);
+                        }
+                        widgets::icon_close(
+                            ui.painter(),
+                            r.center(),
+                            8.0,
+                            if resp.hovered() { TEXT } else { TEXT_MUTED },
+                        );
+                        if resp.on_hover_text("Dismiss").clicked() {
+                            dismiss = true;
+                        }
+                    });
+                    ui.add_space(10.0);
+                    // Name and extension, both editable: the guess may be wrong.
+                    let mut enter = false;
+                    ui.horizontal(|ui| {
+                        ui.spacing_mut().item_spacing.x = 4.0;
+                        let name = hint_field(ui, egui::Id::new("rename_hint_name"), &mut hint.stem, 220.0);
+                        ui.label(
+                            egui::RichText::new(".")
+                                .font(crate::theme::ui(13.0))
+                                .color(TEXT_MUTED),
+                        );
+                        let ext = hint_field(ui, egui::Id::new("rename_hint_ext"), &mut hint.ext, 62.0);
+                        enter = (name.lost_focus() || ext.lost_focus())
+                            && ui.input(|i| i.key_pressed(Key::Enter));
+                    });
+                    if enter && can_rename {
+                        rename = true;
+                    }
+                    ui.add_space(10.0);
+                    ui.horizontal(|ui| {
+                        if widgets::button(ui, ButtonKind::Primary, "Rename", can_rename, vec2(0.0, 30.0))
+                            .clicked()
+                        {
+                            rename = true;
+                        }
+                        if widgets::button(ui, ButtonKind::Quiet, "Not now", true, vec2(0.0, 30.0)).clicked()
+                        {
+                            dismiss = true;
+                        }
+                    });
+                });
+        });
+    let name = st
+        .rename_hint
+        .as_ref()
+        .and_then(|h| Some(format!("{}.{}", h.stem.trim(), clean_ext(&h.ext)?)));
+    if let (true, Some(name)) = (rename, name) {
+        let content = &mut s.vault.content;
+        // Two tabs never share a title: a taken one gets " (2)".
+        if content.rename_note(id, &name) {
+            if let Some(n) = content.note_mut(id) {
+                n.modified = heimdall_core::content::now();
+                // Code mode from the new extension, if that setting is on.
+                n.code_off = false;
+                let title = secret::hide(&n.title);
+                s.touch(Some(id));
+                s.notify(format!("Renamed to \"{title}\""), false);
+            }
+        }
+    }
+    if rename || dismiss {
+        st.rename_hint = None;
+        st.focus_editor = true;
+    }
 }
 
 /// "All shortcuts >" in the tip.

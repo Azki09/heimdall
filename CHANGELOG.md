@@ -4,7 +4,144 @@ All notable changes to Heimdall. Versions follow
 [Semantic Versioning](https://semver.org). Vaults created by any 1.x version
 keep opening in every later version (`docs/DESIGN.md` section 5.6).
 
-## [Unreleased]
+## [1.3.1] - 2026-11-13
+
+### Which file do I download?
+
+| Your system | File | Shows up in the app menu |
+|---|---|---|
+| Windows 10 / 11 (64-bit) | `heimdall.exe` | No installer, run the file |
+| Ubuntu, Debian, Mint (22.04 / 12 or newer) | `heimdall_1.3.1_amd64.deb` | Yes |
+| Any other Linux x86_64 (Fedora 36+, Arch, ...) | `heimdall-1.3.1-linux-x86_64.tar.gz` + `install.sh` | Yes |
+| Linux, portable (USB drive, no install) | `Heimdall-1.3.1-x86_64.AppImage` | No, run the file |
+
+`SHA256SUMS.txt` holds the hash of every file, to check your download.
+
+**Update every computer you use.** Heimdall 1.3.0 and earlier can't open
+a vault once 1.3.1 has saved it.
+
+### Install on Windows
+In PowerShell: download, verify and run `heimdall.exe` (no installer):
+
+```powershell
+cd $HOME\Downloads
+$base = "https://github.com/Azki09/heimdall/releases/download/v1.3.1"
+Invoke-WebRequest "$base/heimdall.exe" -OutFile heimdall.exe
+Invoke-WebRequest "$base/SHA256SUMS.txt" -OutFile SHA256SUMS.txt
+$expected = (Select-String 'heimdall\.exe$' SHA256SUMS.txt).Line.Split(' ')[0]
+if ((Get-FileHash heimdall.exe).Hash -eq $expected) { "OK" } else { "MISMATCH: do not run it" }
+gh attestation verify heimdall.exe -R Azki09/heimdall   # optional, needs the GitHub CLI
+.\heimdall.exe
+```
+
+The executable is not signed yet, so the first time Windows SmartScreen
+may show "Windows protected your PC". If the hash matched, choose
+**More info → Run anyway**.
+
+### Install on Linux
+First download the hash list:
+
+```sh
+cd ~/Downloads
+base=https://github.com/Azki09/heimdall/releases/download/v1.3.1
+curl -LO "$base/SHA256SUMS.txt"
+```
+
+**Ubuntu, Debian, Mint (.deb)**, for every user of the computer:
+
+```sh
+curl -LO "$base/heimdall_1.3.1_amd64.deb"
+sha256sum -c --ignore-missing SHA256SUMS.txt   # must say OK
+gh attestation verify heimdall_1.3.1_amd64.deb -R Azki09/heimdall   # optional
+sudo apt install ./heimdall_1.3.1_amd64.deb
+```
+
+Open it from the app menu, or with `heimdall --gui` from a terminal
+(plain `heimdall` in a terminal is the terminal mode). Remove: `sudo apt remove heimdall`.
+
+**Any distribution (.tar.gz + install.sh)**, only for you, without sudo:
+
+```sh
+curl -LO "$base/heimdall-1.3.1-linux-x86_64.tar.gz"
+sha256sum -c --ignore-missing SHA256SUMS.txt   # must say OK
+gh attestation verify heimdall-1.3.1-linux-x86_64.tar.gz -R Azki09/heimdall   # optional
+tar xzf heimdall-1.3.1-linux-x86_64.tar.gz
+./heimdall-1.3.1-linux-x86_64/install.sh
+```
+
+If it doesn't appear in the menu right away, log out and back in. Remove:
+`~/.local/share/heimdall/uninstall.sh`.
+
+**Portable (AppImage)**, nothing installed, not in the menu:
+
+```sh
+curl -LO "$base/Heimdall-1.3.1-x86_64.AppImage"
+sha256sum -c --ignore-missing SHA256SUMS.txt   # must say OK
+chmod +x Heimdall-1.3.1-x86_64.AppImage
+./Heimdall-1.3.1-x86_64.AppImage
+```
+
+AppImages need FUSE 2 (`sudo apt install libfuse2` on Ubuntu 22.04,
+`libfuse2t64` on 24.04).
+
+Removing Heimdall never deletes your vaults (`.heim` files).
+
+
+### Added
+- **Wrong password limit.** After too many wrong passwords in a row the
+  vault waits before the next try: 5 tries and 5 minutes in Basic, 5 and
+  15 minutes in Hardened, 3 and 30 minutes in Paranoid. Each wait in a row
+  is twice as long (up to a day), and the unlock screen and the terminal
+  say how many tries are left. Changing the date, time or time zone doesn't
+  shorten the wait; restarting the computer starts it again. The recovery
+  code is never held back. Change it, or turn it off, in Settings →
+  Security (Hardened and Paranoid ask for the password).
+- **Terminal: Save as and Export.** `^O` renames the note inside the vault;
+  `^E` writes it to a normal file, not encrypted, to run or compile it
+  (asks what to do with secrets and always confirms). Export is off in
+  Paranoid vaults until it is allowed in Settings → Vault, which asks for
+  the password.
+- **Terminal: pick the vault.** With more than one vault remembered,
+  `heimdall` lists them before the password (`q` quits).
+- **Terminal: commands in the list of notes**, without leaving the vault:
+  `-n test` creates the note "test" and opens it without asking,
+  `-rm 3` moves a note to the trash (asks first), `-mv 3` renames it,
+  `-ls py` shows only the titles with "py" (`-ls` shows all again),
+  `-lock` locks and quits. `?` lists them.
+- **Terminal: remember Hardened and Paranoid vaults.** Opened with
+  `--vault`, the terminal offers to remember one (only for the terminal);
+  `heimdall forget <vault>` removes it.
+- **Suggest the file extension.** A note without an extension whose text
+  looks like code (Python, C, Rust, Bash, Markdown, JSON and more) is
+  offered a name like `tets.py`. In the window a small card appears as soon
+  as you pause typing or paste, also in untitled tabs; both the name and
+  the extension can be changed before Rename. In the terminal, a hint for
+  `^O` after `^S`. Only a suggestion, once per note: code mode turns on
+  only if you rename. Auto-detect in code mode also uses these clues now.
+- **Export button.** An Export button at the top right of the window
+  (Ctrl+Shift+S) writes the open tab to a plain text file with the right
+  name and extension, in two steps: the warning and password, then where to
+  save. The secrets question only appears if the note has secrets.
+- **Terminal: Enter means yes.** Questions are now `[Y/n]`: Enter creates,
+  moves to the trash or exports. Two stay `[y/N]`: replacing an existing
+  file on export, and remembering a Hardened or Paranoid vault.
+- **A secret.** Somewhere in the terminal mode there is a hidden screen.
+  Finding it is up to you.
+
+### Changed
+- **Code mode from the file extension**, in the window and the terminal,
+  now also for notes that already exist and for Markdown (`notes.md`).
+  Turning it off by hand sticks for that note. Turn the whole thing off in
+  Settings → Editor.
+- Vaults are saved with content version 6. Older vaults open as before;
+  Heimdall 1.3.0 and earlier can't open a vault saved by 1.3.1.
+
+### Fixed
+- **Terminal: Backspace did nothing** in terminals that send `^H` for it
+  (in the editor, Find and every question).
+- **Terminal: closing the terminal window with the editor open** left
+  Heimdall running at full CPU, without saving, and the vault stayed busy
+  until it was killed. Now it saves, encrypted, and quits.
 
 ## [1.3.0] - 2026-11-11
 
@@ -464,6 +601,7 @@ First stable release.
 - Releases built by GitHub Actions with a statically linked C runtime,
   published with SHA-256 checksums and a build provenance attestation.
 
+[1.3.1]: https://github.com/Azki09/heimdall/releases/tag/v1.3.1
 [1.3.0]: https://github.com/Azki09/heimdall/releases/tag/v1.3.0
 [1.2.2]: https://github.com/Azki09/heimdall/releases/tag/v1.2.2
 [1.2.1]: https://github.com/Azki09/heimdall/releases/tag/v1.2.1

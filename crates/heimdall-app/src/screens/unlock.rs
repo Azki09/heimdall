@@ -3,11 +3,13 @@
 //! with USB keys show whether the key is connected (DESIGN §9 step 2).
 
 use std::path::PathBuf;
+use std::time::{Duration, Instant};
 
 use eframe::egui::{self, pos2, vec2, Align2, CornerRadius, Key, Sense, Stroke, StrokeKind, Ui};
 use heimdall_core::{Error, LockedVault, RecoveryCode, Vault};
 
 use crate::app::Action;
+use crate::attempts::{Attempts, Status};
 use crate::support::{error_message, file_name, Job};
 use crate::theme::*;
 use crate::usb::{self, Scan, UsbKey};
@@ -35,6 +37,10 @@ pub struct Unlock {
     focus_pending: bool,
     /// Looks for this vault's key files while the screen is open.
     keys: Option<Scan<usb::Lookup>>,
+    /// Wrong passwords on this computer (DESIGN §9.1).
+    attempts: Option<Attempts>,
+    /// The last look at them, read again every second.
+    status: Option<(Status, Instant)>,
 }
 
 /// What the Key row says.
@@ -58,6 +64,7 @@ impl Unlock {
             .ok()
             .filter(|l| l.has_keyfile_slots())
             .map(|l| usb::lookup_scan(*l.vault_id()));
+        let attempts = locked.as_ref().ok().map(|l| Attempts::for_vault(l.vault_id()));
         Self {
             path,
             locked,
@@ -69,7 +76,29 @@ impl Unlock {
             job: None,
             focus_pending: true,
             keys,
+            attempts,
+            status: None,
         }
+    }
+
+    /// Where the wrong password count stands, read at most once a second.
+    fn status(&mut self) -> Option<Status> {
+        let attempts = self.attempts.as_ref()?;
+        match self.status {
+            Some((status, at)) if at.elapsed() < Duration::from_secs(1) => Some(status),
+            _ => {
+                let status = attempts.status();
+                self.status = Some((status, Instant::now()));
+                Some(status)
+            }
+        }
+    }
+
+    fn vault_name(&self) -> String {
+        self.path
+            .file_stem()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default()
     }
 
     fn key_state(&self) -> KeyState<'_> {
@@ -110,6 +139,10 @@ impl Unlock {
         }
         let locked = locked.clone();
         self.error = None;
+        // The recovery code is never held back: it is the way out.
+        if !self.use_recovery && self.status().is_some_and(|s| s.is_locked()) {
+            return;
+        }
         if self.use_recovery {
             let code = match RecoveryCode::parse(&self.recovery.text) {
                 Ok(c) => c,
@@ -141,6 +174,10 @@ impl Unlock {
         }
         if let Some((result, usb)) = self.job.as_ref().and_then(Job::poll) {
             self.job = None;
+            if let (Some(attempts), Ok(vault)) = (&self.attempts, &result) {
+                attempts.succeeded(&vault.content.security);
+                self.status = None;
+            }
             match result {
                 Ok(vault) if self.use_recovery => {
                     return Some(Action::Recovered {
@@ -155,12 +192,27 @@ impl Unlock {
                         usb,
                     })
                 }
+                Err(Error::WrongPassword) if !self.use_recovery && self.attempts.is_some() => {
+                    let status = self.attempts.as_ref().map(Attempts::failed).expect("checked");
+                    self.status = Some((status, Instant::now()));
+                    self.error = Some(status.after_wrong(&self.vault_name()));
+                    self.focus_pending = true;
+                }
                 Err(e) => {
                     self.error = Some(error_message(&e));
                     self.focus_pending = true;
                 }
             }
         }
+        // Waiting: the countdown under the field moves every second.
+        let status = if self.use_recovery { None } else { self.status() };
+        let waiting = status.is_some_and(|s| s.is_locked());
+        if waiting {
+            ctx.request_repaint_after(Duration::from_millis(500));
+        }
+        let name = self.vault_name();
+        let wait_note = status.and_then(|s| s.locked_message(&name));
+        let tries_note = status.and_then(|s| s.warning(&name));
 
         let mut action = None;
         let busy = self.job.is_some();
@@ -179,7 +231,7 @@ impl Unlock {
         screens::centered_column(
             ctx,
             340.0,
-            200.0 + info_h + 30.0 + field_h + key_h + 150.0,
+            200.0 + info_h + 30.0 + field_h + key_h + 150.0 + if wait_note.is_some() { 17.0 } else { 0.0 },
             |ui| {
                 ui.vertical_centered(|ui| {
                     widgets::logo(ui, 6.0);
@@ -243,16 +295,23 @@ impl Unlock {
                 };
 
                 ui.add_space(8.0);
-                match (&self.error, busy) {
-                    (_, true) => {
+                match (&self.error, busy, &wait_note) {
+                    (_, true, _) => {
                         widgets::label(ui, "Unlocking…", 12.0, TEXT_MUTED);
                     }
-                    (Some(e), false) => {
+                    (_, false, Some((first, second))) => {
+                        widgets::label(ui, first, 12.0, DANGER);
+                        widgets::label(ui, second, 12.0, DANGER);
+                    }
+                    (Some(e), false, None) => {
                         widgets::label(ui, e, 12.0, DANGER);
                     }
-                    (None, false) => {
-                        ui.add_space(17.0);
-                    }
+                    (None, false, None) => match &tries_note {
+                        Some(note) => {
+                            widgets::label(ui, note, 12.0, TEXT_MUTED);
+                        }
+                        None => ui.add_space(17.0),
+                    },
                 }
                 ui.add_space(12.0);
 
@@ -275,7 +334,7 @@ impl Unlock {
                     && if self.use_recovery {
                         !self.recovery.text.trim().is_empty()
                     } else {
-                        !self.password.text.is_empty() && key_ok
+                        !self.password.text.is_empty() && key_ok && !waiting
                     };
                 let clicked =
                     widgets::button(ui, ButtonKind::Primary, "Unlock", ready, vec2(340.0, 42.0)).clicked();

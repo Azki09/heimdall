@@ -21,6 +21,11 @@ use windows_sys::Win32::System::IO::DeviceIoControl;
 
 use crate::Drive;
 
+pub fn boot_clock_ms() -> u64 {
+    // SAFETY: no arguments; milliseconds since boot, sleep included.
+    unsafe { windows_sys::Win32::System::SystemInformation::GetTickCount64() }
+}
+
 pub fn usb_drives() -> Vec<Drive> {
     let system = std::env::var("SystemDrive")
         .unwrap_or_else(|_| "C:".into())

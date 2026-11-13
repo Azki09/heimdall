@@ -16,6 +16,7 @@
 //! colors, and a braille minimap on the right that the mouse wheel scrolls.
 
 use std::io::{self, Stdout, Write};
+use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use crossterm::cursor::{Hide, MoveTo, Show};
@@ -31,11 +32,13 @@ use heimdall_core::secret;
 use uuid::Uuid;
 use zeroize::{Zeroize, Zeroizing};
 
-use super::prompt::TICK;
+use super::paths;
+use super::prompt::{self, Completion, TICK};
 use super::session::{LockEvent, TermSession};
 use super::text::{str_width, truncate, Cell, Doc, Glyph, SECRET, TAB_W};
 use crate::code::{self, Kind, Language, Span};
-use crate::support::MAX_NOTE_BYTES;
+use crate::plain::{self, Secrets};
+use crate::support::{error_message, MAX_NOTE_BYTES};
 
 /// Which note the editor works on.
 pub enum Target {
@@ -85,9 +88,14 @@ const KEYS_MAIN: &[&str] = &["^S Save", "^Q Quit", "^F Find", "^R Reveal", "^G H
 const KEYS_CODE: &[&str] = &["^S Save", "^Q Quit", "^F Find", "^T Code", "^G Help"];
 const KEYS_FIND: &[&str] = &["Enter Next", "^P Previous", "Esc Cancel"];
 const KEYS_QUIT: &[&str] = &["Y Yes", "N No", "Esc Cancel"];
+const KEYS_SAVE_AS: &[&str] = &["Enter Save", "Esc Cancel"];
+const KEYS_EXPORT: &[&str] = &["Enter Next", "Tab Complete", "Esc Cancel"];
+const KEYS_SECRETS: &[&str] = &["H [secret]", "K {*...*}", "R Real values", "Esc Cancel"];
 
 pub const HELP: &[(&str, &str)] = &[
     ("^S", "Save"),
+    ("^O", "Save as (rename)"),
+    ("^E", "Export to a file"),
     ("^Q", "Quit"),
     ("^F", "Find"),
     ("^P", "Find previous"),
@@ -106,6 +114,18 @@ enum Mode {
     Find,
     ConfirmQuit,
     Help,
+    /// `^O`: the new title, in `field`.
+    SaveAs,
+    /// `^E`, first step: where, in `field`.
+    ExportPath,
+    /// `^E`: what to do with the note's secrets.
+    ExportSecrets(PathBuf),
+    /// `^E`, last step: the file won't be encrypted.
+    ExportConfirm {
+        path: PathBuf,
+        secrets: Secrets,
+        replace: bool,
+    },
 }
 
 /// The alternate screen in raw mode, for as long as this lives.
@@ -141,6 +161,15 @@ impl Drop for Screen {
     fn drop(&mut self) {
         restore_terminal();
     }
+}
+
+/// The start of a note, enough to guess its language from.
+fn head(text: &str) -> &str {
+    let mut end = text.len().min(8 * 1024);
+    while !text.is_char_boundary(end) {
+        end -= 1;
+    }
+    &text[..end]
 }
 
 /// Back to the normal screen. Also called from the panic hook.
@@ -198,6 +227,12 @@ struct Editor<'a> {
     mask_pasted: bool,
     /// Code mode (`^T`).
     code: bool,
+    /// Code mode was turned off by hand ([`Note::code_off`]).
+    code_off: bool,
+    /// What is typed in Save as and Export.
+    field: String,
+    /// The last name suggested (`tets.py`), so `^S` says it once.
+    suggested: Option<String>,
     /// The language the note was saved with ("" = detect it).
     language_id: String,
     language: Option<&'static Language>,
@@ -210,7 +245,7 @@ struct Editor<'a> {
 /// Opens `target` in the editor until `^Q` or a lock. `title` is what the
 /// header shows.
 pub fn edit(session: &mut TermSession, target: Target, title: String) -> io::Result<Exit> {
-    let (doc, code_mode) = match &target {
+    let (doc, code_mode, code_off, own_title) = match &target {
         Target::Note(id) => {
             let note = session
                 .vault
@@ -218,22 +253,26 @@ pub fn edit(session: &mut TermSession, target: Target, title: String) -> io::Res
                 .note(*id)
                 .ok_or_else(|| io::Error::other("the note is gone"))?;
             let cursor = usize::try_from(note.cursor).unwrap_or(usize::MAX);
-            (Doc::new(&note.body, cursor, MAX_NOTE_BYTES), note.code.clone())
+            (
+                Doc::new(&note.body, cursor, MAX_NOTE_BYTES),
+                note.code.clone(),
+                note.code_off,
+                note.title.clone(),
+            )
         }
-        Target::New(title) => {
-            // A new note named like a source file (`x.py`, `index.html`,
-            // `main.c`) starts in code mode, its language taken from the
-            // extension. Markdown is prose: it stays a normal note.
-            let source = title
-                .rsplit_once('.')
-                .and_then(|(_, ext)| code::by_extension(ext))
-                .is_some_and(|l| l.id != "markdown");
-            let code_mode = source.then(|| CodeMode {
-                language: String::new(),
-            });
-            (Doc::new("", 0, MAX_NOTE_BYTES), code_mode)
-        }
+        Target::New(title) => (Doc::new("", 0, MAX_NOTE_BYTES), None, false, title.clone()),
     };
+    // A note named like a source file (`x.py`, `notes.md`) is in code
+    // mode, unless it was turned off by hand (DESIGN §10.6).
+    let from_extension =
+        (code_mode.is_none() && !code_off && session.vault.content.editor.code_from_extension)
+            .then(|| code::by_title(&own_title))
+            .flatten();
+    let code_mode = code_mode.or_else(|| {
+        from_extension.map(|_| CodeMode {
+            language: String::new(),
+        })
+    });
     let editor_settings = &session.vault.content.editor;
     let tab = match editor_settings.tab_inserts {
         TabInsert::Spaces(n) => " ".repeat(usize::from(n.clamp(1, 16))),
@@ -256,6 +295,9 @@ pub fn edit(session: &mut TermSession, target: Target, title: String) -> io::Res
         tab,
         mask_pasted,
         code: code_mode.is_some(),
+        code_off,
+        field: String::new(),
+        suggested: None,
         language_id: code_mode.map(|c| c.language).unwrap_or_default(),
         language: None,
         truecolor,
@@ -265,6 +307,13 @@ pub fn edit(session: &mut TermSession, target: Target, title: String) -> io::Res
     editor.apply_code_mode();
     if matches!(editor.target, Target::New(_)) {
         editor.say("[ New note. It is created when you save ]");
+    } else if let (Some(language), Some((_, ext))) = (from_extension, own_title.rsplit_once('.')) {
+        editor.say(format!(
+            "[ Code mode: {}, from .{ext}. ^T turns it off ]",
+            language.name
+        ));
+    } else if editor.code {
+        editor.suggest_extension();
     }
     let mut screen = Screen::enter()?;
     let exit = editor.run(&mut screen);
@@ -282,11 +331,18 @@ impl Editor<'_> {
             }
             heimdall_platform::set_unsaved(self.doc.modified);
             screen.set_mouse(self.code)?;
-            self.draw(screen)?;
-            if !event::poll(TICK)? {
-                continue;
+            // A terminal that can't be drawn on or read from is gone:
+            // save, encrypted, and leave, as when it is closed.
+            let ready = self.draw(screen).and_then(|()| event::poll(TICK));
+            match ready {
+                Ok(false) => continue,
+                Ok(true) => {}
+                Err(_) => return Ok(self.hang_up()),
             }
-            match event::read()? {
+            let Ok(event) = event::read() else {
+                return Ok(self.hang_up());
+            };
+            match event {
                 Event::Key(key) if key.kind != KeyEventKind::Release => {
                     self.session.touch();
                     self.message = None;
@@ -299,9 +355,11 @@ impl Editor<'_> {
                     self.session.touch();
                     self.cutting = false;
                     let text = Zeroizing::new(text);
+                    let line = text.chars().take_while(|c| !c.is_control());
                     match self.mode {
                         Mode::Edit => self.paste(&text),
-                        Mode::Find => self.query.extend(text.chars().take_while(|c| !c.is_control())),
+                        Mode::Find => self.query.extend(line),
+                        Mode::SaveAs | Mode::ExportPath => self.field.extend(line),
                         _ => {}
                     }
                 }
@@ -312,6 +370,13 @@ impl Editor<'_> {
                 _ => {} // a resize is picked up by the next draw
             }
         }
+    }
+
+    fn hang_up(&mut self) -> Exit {
+        self.lock(LockEvent::HungUp).unwrap_or(Exit::Locked {
+            event: LockEvent::HungUp,
+            saved: None,
+        })
     }
 
     /// Saves and leaves. Stays open only if saving failed and the event
@@ -368,6 +433,7 @@ impl Editor<'_> {
             (false, Some(_)) => note.code = None,
             _ => {}
         }
+        note.code_off = self.code_off;
         self.session.save()?;
         self.doc.modified = false;
         Ok(())
@@ -384,11 +450,158 @@ impl Editor<'_> {
             // Detected like the app does: the title's extension, or a `#!` line.
             let mut probe = Note::new(0);
             probe.title = self.title.clone();
-            probe.body = truncate(self.doc.text(), 200).to_owned();
+            probe.body = head(self.doc.text()).to_owned();
             code::detect(&probe)
         } else {
             code::by_id(&self.language_id)
         };
+    }
+
+    /// The note's own title: what Save as starts from. Empty for a note
+    /// named after its first line.
+    fn own_title(&self) -> String {
+        match &self.target {
+            Target::Note(id) => self
+                .session
+                .vault
+                .content
+                .note(*id)
+                .map(|n| n.title.clone())
+                .unwrap_or_default(),
+            Target::New(title) => title.clone(),
+        }
+    }
+
+    /// `tets` → `tets.py`, when the language is known (chosen, or guessed
+    /// from the text) and the title has no extension of its own. Only a
+    /// suggestion: code mode stays as it is (DESIGN §10.6).
+    fn suggested_name(&self) -> Option<String> {
+        let mut probe = Note::new(0);
+        probe.title = self.own_title();
+        probe.body = head(self.doc.text()).to_owned();
+        probe.code = self.code.then(|| CodeMode {
+            language: self.language_id.clone(),
+        });
+        code::suggested_title(&probe)
+    }
+
+    fn suggest_extension(&mut self) {
+        self.suggest_extension_after("");
+    }
+
+    /// The suggestion, after `before` ("Saved. ") on the same line.
+    fn suggest_extension_after(&mut self, before: &str) {
+        let Some(name) = self.suggested_name() else {
+            return;
+        };
+        let language = name
+            .rsplit_once('.')
+            .and_then(|(_, ext)| code::by_extension(ext))
+            .map_or("code", |l| l.name);
+        self.say(format!(
+            "[ {before}Looks like {language}. ^O to save as {} ]",
+            secret::hide(&name)
+        ));
+        self.suggested = Some(name);
+    }
+
+    /// `^O`: the note gets the title in `field` (one no other note has)
+    /// and is saved. It stays in the vault, encrypted.
+    fn save_as(&mut self) {
+        let name = self.field.trim().to_owned();
+        if name.is_empty() || name.chars().any(char::is_control) {
+            self.say("[ That title can't be used ]");
+            return;
+        }
+        self.mode = Mode::Edit;
+        self.field.clear();
+        let content = &mut self.session.vault.content;
+        let title = match &self.target {
+            Target::Note(id) if content.note(*id).is_some() => {
+                content.rename_note(*id, &name);
+                content.note(*id).map_or(name, |n| n.title.clone())
+            }
+            _ => {
+                let title = content.free_title(&name);
+                self.target = Target::New(title.clone());
+                title
+            }
+        };
+        self.title = title.clone();
+        // A name like `x.py` is a new reason for code mode.
+        if code::by_title(&title).is_some() && content.editor.code_from_extension {
+            self.code = true;
+            self.code_off = false;
+            self.language_id.clear();
+        }
+        self.apply_code_mode();
+        match self.save() {
+            Ok(()) => self.say(format!("[ Saved as \"{}\" ]", secret::hide(&title))),
+            Err(e) => self.say(e),
+        }
+    }
+
+    /// `^E`: asks where, with the note's file name in the current folder.
+    fn start_export(&mut self) {
+        if !self.session.vault.content.security.terminal_export {
+            self.say("[ Export is off for this vault. Turn it on in Settings > Vault ]");
+            return;
+        }
+        let mut probe = Note::new(0);
+        probe.title = self.title.clone();
+        probe.body = head(self.doc.text()).to_owned();
+        probe.code = self.code.then(|| CodeMode {
+            language: self.language_id.clone(),
+        });
+        let name = plain::file_name_for(&probe);
+        self.field = match std::env::current_dir() {
+            Ok(dir) => paths::short_path(&dir.join(&name)),
+            Err(_) => name,
+        };
+        self.mode = Mode::ExportPath;
+    }
+
+    fn export_path_entered(&mut self) {
+        let typed = self.field.trim();
+        if typed.is_empty() {
+            self.mode = Mode::Edit;
+            return;
+        }
+        let mut path = paths::expand_home(Path::new(typed));
+        if path.is_relative() {
+            if let Ok(dir) = std::env::current_dir() {
+                path = dir.join(path);
+            }
+        }
+        if path.is_dir() {
+            self.say("[ That is a folder: add a file name ]");
+            return;
+        }
+        if !path.parent().is_some_and(Path::is_dir) {
+            self.say("[ That folder doesn't exist ]");
+            return;
+        }
+        self.mode = if secret::scan(self.doc.text()).secrets.is_empty() {
+            Mode::ExportConfirm {
+                replace: path.exists(),
+                path,
+                secrets: Secrets::Keep,
+            }
+        } else {
+            Mode::ExportSecrets(path)
+        };
+    }
+
+    fn export(&mut self, path: &Path, secrets: Secrets) {
+        let mut note = Note::new(0);
+        note.title = self.title.clone();
+        note.body = self.doc.text().to_owned();
+        let text = plain::note_text(&note, secrets, false);
+        let shown = paths::short_path(path);
+        match heimdall_core::storage::write_atomic(path, text.as_bytes()) {
+            Ok(()) => self.say(format!("[ Exported, not encrypted: {shown} ]")),
+            Err(e) => self.say(format!("[ Not exported: {} ]", error_message(&e))),
+        }
     }
 
     fn paste(&mut self, text: &str) {
@@ -421,6 +634,81 @@ impl Editor<'_> {
                 self.mode = Mode::Edit;
                 None
             }
+            Mode::SaveAs | Mode::ExportPath => {
+                self.key_field(key);
+                None
+            }
+            Mode::ExportSecrets(_) | Mode::ExportConfirm { .. } => {
+                self.key_export(key);
+                None
+            }
+        }
+    }
+
+    /// Typing in Save as and Export.
+    fn key_field(&mut self, key: KeyEvent) {
+        let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+        match key.code {
+            KeyCode::Esc => self.mode = Mode::Edit,
+            KeyCode::Char('c' | 'g') if ctrl => self.mode = Mode::Edit,
+            KeyCode::Enter if matches!(self.mode, Mode::SaveAs) => self.save_as(),
+            KeyCode::Enter => self.export_path_entered(),
+            // Some terminals send ^H for Backspace.
+            KeyCode::Backspace => {
+                self.field.pop();
+            }
+            KeyCode::Char('h') if ctrl => {
+                self.field.pop();
+            }
+            KeyCode::Char('u') if ctrl => self.field.clear(),
+            KeyCode::Tab if matches!(self.mode, Mode::ExportPath) => {
+                let found = paths::complete(&self.field, |_| true);
+                match prompt::completion(&self.field, &found) {
+                    Completion::Line(text) => self.field = text,
+                    Completion::List(found) => {
+                        let names: Vec<&str> = found.iter().map(|f| paths::last_part(f)).collect();
+                        self.say(format!("[ {} ]", names.join("  ")));
+                    }
+                    Completion::Nothing => {}
+                }
+            }
+            KeyCode::Char(c) if !ctrl && !key.modifiers.contains(KeyModifiers::ALT) => self.field.push(c),
+            _ => {}
+        }
+    }
+
+    /// The last two steps of `^E`.
+    fn key_export(&mut self, key: KeyEvent) {
+        let mode = std::mem::replace(&mut self.mode, Mode::Edit);
+        let pressed = match key.code {
+            KeyCode::Char(c) => c.to_ascii_lowercase(),
+            KeyCode::Enter => '\n',
+            _ => '\0',
+        };
+        match (mode, pressed) {
+            (Mode::ExportSecrets(path), 'h' | 'k' | 'r') => {
+                let secrets = match pressed {
+                    'h' => Secrets::Hide,
+                    'k' => Secrets::Keep,
+                    _ => Secrets::Reveal,
+                };
+                self.mode = Mode::ExportConfirm {
+                    replace: path.exists(),
+                    path,
+                    secrets,
+                };
+            }
+            // Enter is yes, except when a file would be replaced.
+            (Mode::ExportConfirm { path, secrets, .. }, 'y') => self.export(&path, secrets),
+            (
+                Mode::ExportConfirm {
+                    path,
+                    secrets,
+                    replace: false,
+                },
+                '\n',
+            ) => self.export(&path, secrets),
+            _ => self.say("[ Not exported ]"),
         }
     }
 
@@ -430,7 +718,13 @@ impl Editor<'_> {
         match key.code {
             KeyCode::Char(c) if ctrl => match c.to_ascii_lowercase() {
                 's' => match self.save() {
-                    Ok(()) => self.say("[ Saved ]"),
+                    Ok(()) => {
+                        self.say("[ Saved ]");
+                        // Once per name, not on every ^S.
+                        if self.suggested_name() != self.suggested {
+                            self.suggest_extension_after("Saved. ");
+                        }
+                    }
                     Err(e) => self.say(e),
                 },
                 'q' if self.doc.modified => self.mode = Mode::ConfirmQuit,
@@ -444,10 +738,15 @@ impl Editor<'_> {
                 }
                 't' => {
                     self.code = !self.code;
+                    // Off by hand: the title's extension doesn't turn it on again.
+                    self.code_off = !self.code;
                     self.doc.modified = true;
                     self.apply_code_mode();
                     let state = if self.code { "on" } else { "off" };
                     self.say(format!("[ Code mode {state} ]"));
+                    if self.code {
+                        self.suggest_extension();
+                    }
                 }
                 'z' => {
                     if !self.doc.undo() {
@@ -475,6 +774,16 @@ impl Editor<'_> {
                     }
                 }
                 'l' => return self.lock(LockEvent::Manual),
+                'o' => {
+                    self.field = self.suggested_name().unwrap_or_else(|| match self.own_title() {
+                        t if t.is_empty() => self.title.clone(),
+                        t => t,
+                    });
+                    self.mode = Mode::SaveAs;
+                }
+                'e' => self.start_export(),
+                // Some terminals send ^H for Backspace.
+                'h' => self.doc.backspace(),
                 'c' => self.say("[ ^Q quits ]"),
                 _ => {}
             },
@@ -535,6 +844,9 @@ impl Editor<'_> {
                 }
             }
             KeyCode::Backspace => {
+                self.query.pop();
+            }
+            KeyCode::Char('h') if ctrl => {
                 self.query.pop();
             }
             KeyCode::Char(c) if !ctrl && !key.modifiers.contains(KeyModifiers::ALT) => self.query.push(c),
@@ -753,7 +1065,11 @@ impl Editor<'_> {
             _ => String::new(),
         };
         let main_keys = if self.code { KEYS_CODE } else { KEYS_MAIN };
-        let (status, keys, cursor) = match self.mode {
+        let question = |prompt: String, shortcuts: &[&str]| {
+            let at = (str_width(&prompt) + 1).min(cols);
+            (bar(&prompt, "", "", w), keys(shortcuts), (at, h - 2))
+        };
+        let (status, keys, cursor) = match &self.mode {
             Mode::Find => {
                 let prompt = format!(" Find: {}", self.query);
                 let at = str_width(&prompt).min(cols);
@@ -763,6 +1079,32 @@ impl Editor<'_> {
                 let prompt = format!(" Save changes to \"{}\"?", self.title);
                 let at = (str_width(&prompt) + 1).min(cols);
                 (bar(&prompt, "", &countdown, w), keys(KEYS_QUIT), (at, h - 2))
+            }
+            Mode::SaveAs | Mode::ExportPath => {
+                let (label, shortcuts) = match self.mode {
+                    Mode::SaveAs => (" Save as: ", KEYS_SAVE_AS),
+                    _ => (" Export to: ", KEYS_EXPORT),
+                };
+                let prompt = field_line(label, &self.field, cols);
+                let at = str_width(&prompt).min(cols);
+                (bar(&prompt, message, "", w), keys(shortcuts), (at, h - 2))
+            }
+            Mode::ExportSecrets(_) => {
+                let n = secret::scan(self.doc.text()).secrets.len();
+                let plural = if n == 1 { "" } else { "s" };
+                question(
+                    format!(" This note has {n} secret{plural}. In the file:"),
+                    KEYS_SECRETS,
+                )
+            }
+            Mode::ExportConfirm { path, replace, .. } => {
+                let shown = paths::short_path(path);
+                let prompt = if *replace {
+                    format!(" {shown} exists. Replace it with a file that is NOT encrypted? [y/N]")
+                } else {
+                    format!(" {shown} will NOT be encrypted. Export? [Y/n]")
+                };
+                question(prompt, KEYS_QUIT)
             }
             _ => {
                 let (ln, col) = self.doc.line_col();
@@ -870,10 +1212,12 @@ impl Editor<'_> {
             "    moves and deletes as one block, and ^R shows the one at the cursor.".to_owned(),
             String::new(),
             " :: Code mode".to_owned(),
-            "    Line numbers, colors and a map of the file. The wheel scrolls;".to_owned(),
-            "    on the map it scrolls faster, and a click there jumps.".to_owned(),
-            "    Hold Shift to select text with the mouse.".to_owned(),
+            "    Line numbers, colors and a map of the file. The wheel scrolls, faster".to_owned(),
+            "    on the map, and a click there jumps. Shift+drag selects text.".to_owned(),
             String::new(),
+            " :: Save as and export".to_owned(),
+            "    ^O renames the note in the vault, where it stays encrypted.".to_owned(),
+            "    ^E writes it to a plain file that is NOT encrypted.".to_owned(),
             " Press any key to go back.".to_owned(),
         ]);
         for row in 0..h {
@@ -924,6 +1268,27 @@ pub fn help_lines() -> Vec<String> {
             format!("    {left:<25}{right}").trim_end().to_owned()
         })
         .collect()
+}
+
+/// ` Save as: respaldo.py`, its start cut off if it is too long for
+/// `cols`, so the end, where the cursor is, stays in view.
+fn field_line(label: &str, field: &str, cols: usize) -> String {
+    let full = format!("{label}{field}");
+    if str_width(&full) < cols {
+        return full;
+    }
+    let room = cols.saturating_sub(str_width(label) + 4);
+    let mut tail: Vec<char> = Vec::new();
+    let mut width = 0;
+    for c in field.chars().rev() {
+        width += super::text::char_width(c);
+        if width > room {
+            break;
+        }
+        tail.push(c);
+    }
+    let tail: String = tail.into_iter().rev().collect();
+    format!("{label}...{tail}")
 }
 
 /// Writes one whole screen row.

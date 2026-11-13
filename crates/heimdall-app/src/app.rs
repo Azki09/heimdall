@@ -51,6 +51,8 @@ pub enum Action {
     ImportVault,
     /// "Export as plain text…".
     ExportText,
+    /// The Export button of the tab bar: this tab as plain text.
+    ExportTab(uuid::Uuid),
     /// "Import text files…": each file becomes a note.
     ImportText,
     /// "Save a backup copy…" of the vault file.
@@ -230,6 +232,11 @@ impl HeimdallApp {
             Action::ExportText => {
                 if let Some(s) = &self.session {
                     self.screen = Screen::Transfer(Box::new(Transfer::export_text(s)));
+                }
+            }
+            Action::ExportTab(id) => {
+                if let Some(s) = &self.session {
+                    self.screen = Screen::Transfer(Box::new(Transfer::export_tab(s, id)));
                 }
             }
             Action::ImportText => {

@@ -107,7 +107,24 @@ pub struct RecentEntry {
 
 impl RecentVaults {
     pub fn load() -> Self {
-        let file = config_dir().map(|d| d.join("recent.txt"));
+        Self::load_from("recent.txt")
+    }
+
+    /// Vaults the terminal remembers although their profile keeps no
+    /// recent list, because the user said so (DESIGN §17.1). The app
+    /// never shows them.
+    #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+    pub fn terminal() -> Self {
+        Self::load_from("terminal-vaults.txt")
+    }
+
+    #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+    pub fn contains(&self, path: &Path) -> bool {
+        self.entries.iter().any(|e| e.path == path)
+    }
+
+    fn load_from(name: &str) -> Self {
+        let file = config_dir().map(|d| d.join(name));
         let entries = file
             .as_ref()
             .and_then(|f| std::fs::read_to_string(f).ok())
@@ -149,6 +166,9 @@ impl RecentVaults {
 
     fn save(&self) {
         let Some(file) = &self.file else { return };
+        if self.entries.is_empty() && !file.exists() {
+            return;
+        }
         if let Some(dir) = file.parent() {
             let _ = std::fs::create_dir_all(dir);
         }

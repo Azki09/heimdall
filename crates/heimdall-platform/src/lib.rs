@@ -125,6 +125,19 @@ pub fn take_session_event() -> Option<SessionEvent> {
     None
 }
 
+/// Milliseconds since the computer started, time asleep included. Unlike
+/// the date and time, nobody can move it forward without restarting, when
+/// it starts again from 0. The wait after too many wrong passwords is
+/// measured with it (DESIGN §9.1).
+pub fn boot_clock_ms() -> u64 {
+    #[cfg(windows)]
+    return windows::boot_clock_ms();
+    #[cfg(target_os = "linux")]
+    return linux::boot_clock_ms();
+    #[cfg(not(any(windows, target_os = "linux")))]
+    0
+}
+
 /// Whether the Menu key (or Shift+F10) was pressed since the last call.
 /// Windows only; on Linux Shift+F10 reaches egui as a normal key.
 pub fn take_menu_key() -> bool {

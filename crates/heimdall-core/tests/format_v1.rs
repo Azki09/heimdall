@@ -1,14 +1,15 @@
-//! Compatibility promise for format 1 / content versions 4 and 5
+//! Compatibility promise for format 1 / content versions 4, 5 and 6
 //! (DESIGN §5.6).
 //!
 //! The files in `tests/fixtures/` were written once and are committed:
 //! `basic.heim` and `hardened.heim` by the code of v0.5 (content version 4),
-//! `basic-v5.heim` by v1.0.0 (content version 5, what 1.x writes). Every future version must still open them and read exactly
+//! `basic-v5.heim` by v1.0.0 (content version 5) and `basic-v6.heim` by
+//! v1.3.1 (content version 6). Every future version must still open them and read exactly
 //! the same content. Never regenerate them to make this test pass: if it
 //! fails, the change broke existing vaults.
 //!
 //! They were created with `cargo test -p heimdall-core --test format_v1 --
-//! --ignored write_fixtures` (and `write_fixture_v5`), which only exist to
+//! --ignored write_fixtures` (and `write_fixture_v5`, `write_fixture_v6`), which only exist to
 //! document how.
 
 use std::path::PathBuf;
@@ -178,6 +179,50 @@ fn basic_v5_fixture_opens_with_password_and_recovery() {
         .unlock_with_recovery(&RecoveryCode::parse(code.trim()).unwrap())
         .unwrap();
     assert_eq!(r.content, expected_v5());
+}
+
+/// Everything content version 6 adds on top of [`expected_v5`].
+fn expected_v6() -> Content {
+    let mut c = expected_v5();
+    c.notes[1].code_off = true;
+    c.security.max_tries = Some(9);
+    c.security.lockout_s = 120;
+    c.security.terminal_export = false;
+    c.editor.code_from_extension = false;
+    c
+}
+
+#[test]
+fn basic_v6_fixture_opens_with_password_and_recovery() {
+    let locked = LockedVault::parse(&read("basic-v6.heim")).unwrap();
+    assert!(!locked.requires_keyfile());
+    let v = locked.unlock_with_password(&pw(BASIC_PASSWORD), None).unwrap();
+    assert_eq!(v.content, expected_v6());
+
+    let code = std::fs::read_to_string(fixtures().join("basic-v6.recovery.txt")).unwrap();
+    let r = locked
+        .unlock_with_recovery(&RecoveryCode::parse(code.trim()).unwrap())
+        .unwrap();
+    assert_eq!(r.content, expected_v6());
+}
+
+/// Writes the content version 6 fixture (v1.3.1). Reference only.
+#[test]
+#[ignore = "writes a committed fixture; never run it to fix a failure"]
+fn write_fixture_v6() {
+    let dir = fixtures();
+    let mut basic = Vault::create_with_kdf(&pw(BASIC_PASSWORD), Profile::Basic, FAST).unwrap();
+    basic.vault.content = expected_v6();
+    std::fs::write(dir.join("basic-v6.heim"), basic.vault.to_bytes().unwrap()).unwrap();
+    std::fs::write(
+        dir.join("basic-v6.recovery.txt"),
+        format!(
+            "{}
+",
+            *basic.recovery_code.phrase()
+        ),
+    )
+    .unwrap();
 }
 
 /// Writes the content version 5 fixture (v1.0.0). Reference only.

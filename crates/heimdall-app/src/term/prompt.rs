@@ -118,10 +118,17 @@ pub fn read_line(
         if let Some(lock) = watch() {
             break Input::Locked(lock);
         }
-        if !event::poll(TICK)? {
+        // The terminal went away: like being closed.
+        let Ok(ready) = event::poll(TICK) else {
+            break Input::Locked(LockEvent::HungUp);
+        };
+        if !ready {
             continue;
         }
-        match event::read()? {
+        let Ok(event) = event::read() else {
+            break Input::Locked(LockEvent::HungUp);
+        };
+        match event {
             Event::Key(key) if key.kind != KeyEventKind::Release => {
                 let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
                 match key.code {
@@ -133,7 +140,8 @@ pub fn read_line(
                             erase(&mut err, c, hidden)?;
                         }
                     }
-                    KeyCode::Backspace => {
+                    // Some terminals send ^H for Backspace.
+                    KeyCode::Backspace | KeyCode::Char('h') if key.code == KeyCode::Backspace || ctrl => {
                         if let Some(c) = line.pop() {
                             erase(&mut err, c, hidden)?;
                         }
@@ -153,7 +161,26 @@ pub fn read_line(
                                 Completion::List(found) => {
                                     add_rows(str_width(label) + str_width(&line));
                                     write!(err, "\r\n")?;
-                                    for row in in_columns(&found, columns().saturating_sub(1)) {
+                                    // Paths are listed by their last part, like a shell;
+                                    // `-rm hola`'s titles without the `-rm`.
+                                    let command = line
+                                        .split_once(' ')
+                                        .filter(|(c, _)| c.starts_with('-'))
+                                        .map(|(c, _)| c.len() + 1);
+                                    let shown: Vec<String> = if let Some(skip) = command {
+                                        found
+                                            .iter()
+                                            .map(|f| f.get(skip..).unwrap_or(f).to_owned())
+                                            .collect()
+                                    } else if line.contains('/') {
+                                        found
+                                            .iter()
+                                            .map(|f| super::paths::last_part(f).to_owned())
+                                            .collect()
+                                    } else {
+                                        found
+                                    };
+                                    for row in in_columns(&shown, columns().saturating_sub(1)) {
                                         add_rows(str_width(&row));
                                         write!(err, "{row}\r\n")?;
                                     }
@@ -214,7 +241,7 @@ fn erase(err: &mut io::Stderr, c: char, hidden: bool) -> io::Result<()> {
 }
 
 #[derive(Debug, PartialEq, Eq)]
-enum Completion {
+pub(super) enum Completion {
     Nothing,
     /// The line becomes this.
     Line(String),
@@ -224,7 +251,7 @@ enum Completion {
 
 /// What Tab does with `typed` when `found` are the titles that start with
 /// it, upper or lower case alike.
-fn completion(typed: &str, found: &[String]) -> Completion {
+pub(super) fn completion(typed: &str, found: &[String]) -> Completion {
     let Some(first) = found.first() else {
         return Completion::Nothing;
     };

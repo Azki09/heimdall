@@ -9,6 +9,7 @@ use heimdall_core::content::{
 use uuid::Uuid;
 
 use crate::app::Action;
+use crate::attempts::Attempts;
 use crate::chrome;
 use crate::screens::access::Access;
 use crate::screens::confirm::{Outcome, PasswordCheck};
@@ -35,13 +36,23 @@ enum Confirm {
     DeleteNote(Uuid),
 }
 
+/// A change that waits for the vault password.
+enum Pending {
+    /// Show the window in screenshots.
+    CaptureOff,
+    /// The wrong password limit, in Hardened and Paranoid (DESIGN §9.1).
+    Limit { max_tries: Option<u8>, lockout_s: u32 },
+    /// `^E` in the terminal, turned on in a Paranoid vault (DESIGN §17.4).
+    TerminalExport,
+}
+
 #[derive(Default)]
 pub struct Settings {
     page: Page,
     confirm: Option<Confirm>,
     access: Access,
-    /// Turning off "Hide window from screenshots" asks for the password.
-    capture_check: Option<PasswordCheck>,
+    /// Changes that ask for the password first.
+    check: Option<(PasswordCheck, Pending)>,
 }
 
 impl Settings {
@@ -65,12 +76,17 @@ impl Settings {
         // An open dropdown takes Escape first: it only closes the dropdown.
         if !locked_in
             && self.confirm.is_none()
-            && self.capture_check.is_none()
+            && self.check.is_none()
             && !ctx.memory(|m| m.any_popup_open())
             && ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape))
         {
             return Some(Action::Notes);
         }
+        // The limit is also kept outside the vault, for the next unlock.
+        let limit_before = (
+            s.vault.content.security.max_tries,
+            s.vault.content.security.lockout_s,
+        );
         let title = format!("Settings · {}", s.file_name());
         chrome::title_bar(ctx, |ui| chrome::title_text(ui, &title));
 
@@ -128,12 +144,10 @@ impl Settings {
                             return;
                         }
                         match self.page {
-                            Page::Security => {
-                                security(ui, s, recent, &mut self.access, &mut self.capture_check)
-                            }
+                            Page::Security => security(ui, s, recent, &mut self.access, &mut self.check),
                             Page::Access => self.access.page(ui, s),
                             Page::Vault => {
-                                if let Some(a) = vault(ui, s) {
+                                if let Some(a) = vault(ui, s, &mut self.check) {
                                     action = Some(a);
                                 }
                             }
@@ -147,16 +161,28 @@ impl Settings {
 
         self.confirm_dialog(ctx, s);
         self.access.dialog_ui(ctx, s);
-        if let Some(check) = self.capture_check.as_mut() {
+        if let Some((check, _)) = self.check.as_mut() {
             match check.ui(ctx, s) {
                 Outcome::Open => {}
-                Outcome::Canceled => self.capture_check = None,
+                Outcome::Canceled => self.check = None,
                 Outcome::Confirmed => {
-                    self.capture_check = None;
-                    s.vault.content.security.exclude_from_capture = false;
+                    let sec = &mut s.vault.content.security;
+                    match self.check.take().map(|(_, p)| p) {
+                        Some(Pending::CaptureOff) => sec.exclude_from_capture = false,
+                        Some(Pending::Limit { max_tries, lockout_s }) => {
+                            sec.max_tries = max_tries;
+                            sec.lockout_s = lockout_s;
+                        }
+                        Some(Pending::TerminalExport) => sec.terminal_export = true,
+                        None => {}
+                    }
                     s.touch(None);
                 }
             }
+        }
+        let sec = &s.vault.content.security;
+        if (sec.max_tries, sec.lockout_s) != limit_before {
+            Attempts::for_vault(s.vault.vault_id()).set_policy(sec);
         }
         action
     }
@@ -416,7 +442,7 @@ fn security(
     s: &mut Session,
     recent: &mut RecentVaults,
     access: &mut Access,
-    capture_check: &mut Option<PasswordCheck>,
+    check: &mut Option<(PasswordCheck, Pending)>,
 ) {
     widgets::heading(ui, "Security");
     ui.add_space(24.0);
@@ -588,15 +614,82 @@ fn security(
                 sec.exclude_from_capture = true;
                 changed = true;
             } else {
-                *capture_check = Some(PasswordCheck::new(
-                    "Show this window in screenshots?",
-                    "Screenshots, screen recordings and screen sharing (Zoom, Teams…) will be able to capture your notes, and so will any app that records the screen. While it's on, Heimdall shows black in them, in your own screenshots too.",
-                    "Turn off",
-                    true,
+                *check = Some((
+                    PasswordCheck::new(
+                        "Show this window in screenshots?",
+                        "Screenshots, screen recordings and screen sharing (Zoom, Teams…) will be able to capture your notes, and so will any app that records the screen. While it's on, Heimdall shows black in them, in your own screenshots too.",
+                        "Turn off",
+                        true,
+                    ),
+                    Pending::CaptureOff,
                 ));
             }
         }
     });
+
+    // The wrong password limit (DESIGN §9.1). Hardened and Paranoid ask
+    // for the password before it changes.
+    let mut limit = (sec.max_tries, sec.lockout_s);
+    let tries_opts: Vec<(Option<u8>, String)> = [3u8, 5, 10]
+        .iter()
+        .map(|&n| (Some(n), n.to_string()))
+        .chain([(None, "No limit".to_owned())])
+        .collect();
+    let tries_note = match sec.max_tries {
+        None => (
+            "Anyone at this computer can try passwords without waiting.".to_owned(),
+            DANGER,
+        ),
+        Some(n) => (
+            format!("After {n} in a row, the vault waits before the next try."),
+            TEXT_MUTED,
+        ),
+    };
+    setting_row(
+        ui,
+        "Wrong passwords before waiting",
+        Some((tries_note.0.as_str(), tries_note.1)),
+        |ui| {
+            combo(ui, "max_tries", &mut limit.0, &tries_opts);
+        },
+    );
+    if sec.max_tries.is_some() {
+        let wait_opts: Vec<(u32, String)> = [60, 300, 900, 1800, 3600]
+            .iter()
+            .map(|&x| (x, duration_label(x)))
+            .collect();
+        setting_row(
+            ui,
+            "First wait",
+            Some((
+                "Each wait in a row is twice as long, up to 24 hours. Changing the clock doesn't shorten it; restarting the computer starts it again.",
+                TEXT_MUTED,
+            )),
+            |ui| {
+                combo(ui, "lockout", &mut limit.1, &wait_opts);
+            },
+        );
+    }
+    if limit != (sec.max_tries, sec.lockout_s) {
+        if basic {
+            sec.max_tries = limit.0;
+            sec.lockout_s = limit.1;
+            changed = true;
+        } else {
+            *check = Some((
+                PasswordCheck::new(
+                    "Change the password limit?",
+                    "Hardened and Paranoid vaults ask for the password before the wrong password limit changes.",
+                    "Change",
+                    false,
+                ),
+                Pending::Limit {
+                    max_tries: limit.0,
+                    lockout_s: limit.1,
+                },
+            ));
+        }
+    }
 
     let mut remember_changed = false;
     setting_row(
@@ -621,7 +714,7 @@ fn security(
 }
 
 /// Settings → Vault: export, import and backup copies (DESIGN §10.9).
-fn vault(ui: &mut Ui, s: &mut Session) -> Option<Action> {
+fn vault(ui: &mut Ui, s: &mut Session, check: &mut Option<(PasswordCheck, Pending)>) -> Option<Action> {
     let mut action = None;
     widgets::heading(ui, "Vault");
     widgets::label(
@@ -725,6 +818,38 @@ fn vault(ui: &mut Ui, s: &mut Session) -> Option<Action> {
                 changed = widgets::toggle(ui, &mut sec.ask_password_export).changed();
             } else {
                 widgets::label(ui, "Always on", 13.0, TEXT_MUTED);
+            }
+        },
+    );
+    let paranoid = sec.profile == Profile::Paranoid;
+    setting_row(
+        ui,
+        "Export from the terminal",
+        Some((
+            if paranoid {
+                "^E in the terminal (Linux) writes a note to a plain file, not encrypted. Turning it on asks for the password."
+            } else {
+                "^E in the terminal (Linux) writes a note to a plain file, not encrypted."
+            },
+            TEXT_MUTED,
+        )),
+        |ui| {
+            let mut on = sec.terminal_export;
+            if widgets::toggle(ui, &mut on).changed() {
+                if on && paranoid {
+                    *check = Some((
+                        PasswordCheck::new(
+                            "Allow export from the terminal?",
+                            "^E in the terminal will be able to write notes of this Paranoid vault to plain files that anyone with access to this computer can read.",
+                            "Allow",
+                            true,
+                        ),
+                        Pending::TerminalExport,
+                    ));
+                } else {
+                    sec.terminal_export = on;
+                    changed = true;
+                }
             }
         },
     );
@@ -874,6 +999,15 @@ fn editor(ui: &mut Ui, s: &mut Session) {
     );
     setting_row(
         ui,
+        "Code mode from the file extension",
+        Some((
+            "Notes named like main.py or notes.md open in code mode. Turning it off by hand in a tab sticks.",
+            TEXT_MUTED,
+        )),
+        |ui| changed |= widgets::toggle(ui, &mut e.code_from_extension).changed(),
+    );
+    setting_row(
+        ui,
         "Mask pasted secrets",
         Some((
             "Pasted passwords, API keys and tokens become {*secrets*}, shown as dots. Undo right after pasting keeps them plain.",
@@ -981,6 +1115,7 @@ fn shortcuts(ui: &mut Ui) {
                     &[&["Ctrl", "1…8"], &["Ctrl", "9"]],
                 ),
                 ("All tabs, export and import", &[&["Ctrl", "Shift", "E"]]),
+                ("Export this tab as plain text", &[&["Ctrl", "Shift", "S"]]),
             ],
         ),
         (

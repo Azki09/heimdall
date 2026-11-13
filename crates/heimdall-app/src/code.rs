@@ -904,6 +904,30 @@ pub fn by_extension(ext: &str) -> Option<&'static Language> {
     LANGUAGES.iter().find(|l| l.extensions.contains(&ext.as_str()))
 }
 
+/// The language a note's own title names by its extension: `main.py`,
+/// `notes.md`. A title taken from the first line doesn't count.
+pub fn by_title(title: &str) -> Option<&'static Language> {
+    let (stem, ext) = title.trim().rsplit_once('.')?;
+    if stem.is_empty() {
+        return None;
+    }
+    by_extension(ext)
+}
+
+/// Code mode from the file extension (DESIGN §10.6): a note named like a
+/// source file is in code mode, unless it was turned off by hand. Returns
+/// true if it turned it on.
+pub fn auto_code(note: &mut Note, enabled: bool) -> bool {
+    if !enabled || note.code.is_some() || note.code_off || by_title(&note.title).is_none() {
+        return false;
+    }
+    note.code = Some(CodeMode {
+        language: String::new(),
+    });
+    note.wrap = None;
+    true
+}
+
 /// Every extension of every language, for the Import text files dialog.
 pub fn all_extensions() -> Vec<&'static str> {
     LANGUAGES
@@ -944,8 +968,358 @@ pub fn detect(note: &Note) -> Option<&'static Language> {
     } else if head.starts_with("<!doctype html") || head.starts_with("<html") {
         by_id("html")
     } else {
-        None
+        guess_from_text(body)
     }
+}
+
+/// How many lines [`guess_from_text`] looks at.
+const GUESS_LINES: usize = 50;
+/// The points the best language needs, so that prose stays plain.
+const GUESS_MIN: u32 = 3;
+
+/// A clue in one line of text: the language it points to, and how much.
+struct Clue {
+    id: &'static str,
+    points: u32,
+    test: fn(&str) -> bool,
+}
+
+const fn clue(id: &'static str, points: u32, test: fn(&str) -> bool) -> Clue {
+    Clue { id, points, test }
+}
+
+fn starts_word(line: &str, word: &str) -> bool {
+    line.strip_prefix(word)
+        .is_some_and(|rest| rest.is_empty() || rest.starts_with([' ', '(', '\t']))
+}
+
+/// `name: value` with a lowercase key (YAML).
+fn yaml_key(line: &str) -> bool {
+    let Some((key, rest)) = line.split_once(':') else {
+        return false;
+    };
+    !key.is_empty()
+        && key.as_bytes()[0].is_ascii_lowercase()
+        && key
+            .bytes()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == b'_' || c == b'-')
+        && (rest.is_empty() || rest.starts_with(' '))
+}
+
+/// Every clue counts once, however many lines have it: ten lines of
+/// `- item` are one clue, not ten.
+static CLUES: &[Clue] = &[
+    // Python
+    clue("python", 3, |l| {
+        l.starts_with("def ") && l.contains('(') && l.ends_with(':')
+    }),
+    clue("python", 3, |l| l.starts_with("from ") && l.contains(" import ")),
+    clue("python", 3, |l| l.starts_with("if __name__")),
+    clue("python", 2, |l| starts_word(l, "elif") && l.ends_with(':')),
+    clue("python", 2, |l| {
+        (starts_word(l, "except") || l == "try:" || l == "else:") && l.ends_with(':')
+    }),
+    clue("python", 1, |l| {
+        l.starts_with("import ") && !l.ends_with(';') && !l.contains(" from ") && !l.contains('{')
+    }),
+    clue("python", 1, |l| l.starts_with("print(") && !l.ends_with(';')),
+    clue("python", 1, |l| l.contains("self.")),
+    clue("python", 1, |l| {
+        (l.starts_with("class ") || starts_word(l, "for") || starts_word(l, "while") || starts_word(l, "if"))
+            && l.ends_with(':')
+    }),
+    // C, and C++ on top of it
+    clue("c", 3, |l| l.starts_with("#include")),
+    clue("c", 1, |l| l.starts_with("#include") && l.contains(".h")),
+    clue("c", 1, |l| {
+        l.contains("printf(") || l.contains("malloc(") || l.contains("scanf(")
+    }),
+    clue("c", 1, |l| {
+        l.starts_with("int main(") || l.starts_with("void ") && l.contains('(')
+    }),
+    clue("cpp", 2, |l| {
+        l.starts_with("#include <") && !l.contains(".h") && l.ends_with('>')
+    }),
+    clue("cpp", 2, |l| l.contains("std::")),
+    clue("cpp", 2, |l| l.contains("cout <<") || l.contains("cin >>")),
+    clue("cpp", 1, |l| {
+        l.starts_with("template<") || l.starts_with("template <")
+    }),
+    clue("cpp", 1, |l| l.starts_with("using namespace ")),
+    // Rust
+    clue("rust", 3, |l| l.starts_with("fn main()")),
+    clue("rust", 3, |l| {
+        l.starts_with("use std::") || l.starts_with("use crate::")
+    }),
+    clue("rust", 2, |l| l.contains("let mut ")),
+    clue("rust", 2, |l| {
+        l.contains("println!(") || l.contains("format!(") || l.contains("vec![")
+    }),
+    clue("rust", 2, |l| l.starts_with("impl ") || l.starts_with("impl<")),
+    clue("rust", 2, |l| {
+        l.starts_with("pub fn ") || l.starts_with("fn ") && l.contains("->")
+    }),
+    clue("rust", 1, |l| l.starts_with("#[derive(")),
+    // JavaScript, and TypeScript on top of it
+    clue("javascript", 3, |l| l.contains("console.log(")),
+    clue("javascript", 2, |l| l.contains("=> {") || l.contains(") =>")),
+    clue("javascript", 2, |l| {
+        l.contains("require(") || l.contains("document.") || l.contains("window.")
+    }),
+    clue("javascript", 2, |l| {
+        l.starts_with("export default ")
+            || l.starts_with("export const ")
+            || l.starts_with("export function ")
+    }),
+    clue("javascript", 2, |l| {
+        l.starts_with("import ") && (l.contains(" from '") || l.contains(" from \""))
+    }),
+    clue("javascript", 1, |l| l.starts_with("function ") && l.contains('(')),
+    clue("javascript", 1, |l| {
+        (l.starts_with("const ") || l.starts_with("let ") || l.starts_with("var ")) && l.contains(" = ")
+    }),
+    clue("typescript", 2, |l| {
+        l.starts_with("interface ") || l.starts_with("export interface ")
+    }),
+    clue("typescript", 2, |l| {
+        [": string", ": number", ": boolean", ": void", ": any"]
+            .iter()
+            .any(|t| l.contains(t))
+    }),
+    clue("typescript", 1, |l| l.starts_with("type ") && l.contains(" = ")),
+    // Bash
+    clue("bash", 3, |l| l.starts_with("if [ ") || l.starts_with("if [[ ")),
+    clue("bash", 2, |l| l == "fi" || l == "done" || l == "esac"),
+    clue("bash", 2, |l| l.ends_with("; then") || l.ends_with("; do")),
+    clue("bash", 1, |l| l.starts_with("echo ")),
+    clue("bash", 1, |l| l.contains("$(") || l.contains("${")),
+    clue("bash", 1, |l| l.starts_with("export ") && l.contains('=')),
+    clue("bash", 1, |l| starts_word(l, "sudo")),
+    // PowerShell
+    clue("powershell", 3, |l| {
+        l.contains("Write-Host") || l.contains("$PSVersionTable")
+    }),
+    clue("powershell", 2, |l| {
+        ["Get-", "Set-", "New-", "Remove-", "Invoke-", "Import-", "Export-"]
+            .iter()
+            .any(|v| l.contains(v))
+    }),
+    clue("powershell", 2, |l| {
+        l.starts_with("param(") || l.starts_with("[CmdletBinding")
+    }),
+    clue("powershell", 1, |l| {
+        [" -eq ", " -ne ", " -gt ", " -lt ", " -and ", " -or "]
+            .iter()
+            .any(|o| l.contains(o))
+    }),
+    clue("powershell", 1, |l| l.contains("$_.") || l.contains("$env:")),
+    // HTML
+    clue("html", 2, |l| {
+        [
+            "<div", "<p>", "<span", "<a href", "<body", "<head", "<script", "<ul>", "<li>", "<table", "<img ",
+        ]
+        .iter()
+        .any(|t| l.to_ascii_lowercase().contains(t))
+    }),
+    clue("html", 1, |l| l.contains("</")),
+    // SQL
+    clue("sql", 3, |l| {
+        let l = l.to_ascii_lowercase();
+        l.starts_with("select ") && (l.contains(" from ") || l.ends_with(','))
+            || l.starts_with("create table")
+            || l.starts_with("insert into")
+    }),
+    clue("sql", 1, |l| {
+        let l = l.to_ascii_lowercase();
+        l.starts_with("where ")
+            || l.starts_with("from ")
+            || l.starts_with("order by ")
+            || l.starts_with("join ")
+    }),
+    // Go
+    clue("go", 3, |l| l == "package main" || l.starts_with("import (")),
+    clue("go", 2, |l| l.starts_with("func ")),
+    clue("go", 2, |l| l.contains("fmt.")),
+    clue("go", 1, |l| l.contains(" := ")),
+    // Java
+    clue("java", 3, |l| {
+        l.contains("System.out.print") || l.starts_with("import java.")
+    }),
+    clue("java", 3, |l| l.contains("public static void main")),
+    clue("java", 2, |l| l.starts_with("public class ")),
+    // C#
+    clue("csharp", 3, |l| {
+        l.starts_with("using System") || l.contains("Console.Write")
+    }),
+    clue("csharp", 2, |l| {
+        l.starts_with("public class ") || l.starts_with("namespace ")
+    }),
+    // Markdown
+    clue("markdown", 2, |l| {
+        let hashes = l.bytes().take_while(|c| *c == b'#').count();
+        (1..=6).contains(&hashes) && l[hashes..].starts_with(' ')
+    }),
+    clue("markdown", 2, |l| l.starts_with("```")),
+    clue("markdown", 1, |l| {
+        l.starts_with("- ") || l.starts_with("* ") || l.starts_with("1. ")
+    }),
+    clue("markdown", 1, |l| l.contains("](")),
+    clue("markdown", 1, |l| l.contains("**")),
+    // CSS
+    clue("css", 2, |l| {
+        (l.starts_with('.') || l.starts_with('#') || starts_word(l, "body")) && l.ends_with('{')
+    }),
+    clue("css", 2, |l| l.starts_with("@media") || l.starts_with("@import")),
+    clue("css", 2, |l| {
+        l.ends_with(';')
+            && l.split_once(':')
+                .is_some_and(|(k, _)| !k.is_empty() && k.bytes().all(|c| c.is_ascii_lowercase() || c == b'-'))
+    }),
+];
+
+/// Guesses a language from the text alone, for a note whose title says
+/// nothing (DESIGN §10.6): clues in its first lines add points to a
+/// language, and the best one wins if it has [`GUESS_MIN`] and no other
+/// has as many. Ordinary text gets `None`. Only suggests: it never turns
+/// code mode on.
+pub fn guess_from_text(text: &str) -> Option<&'static Language> {
+    // The start is enough, and keeps this cheap on a long note.
+    let mut end = text.len().min(8 * 1024);
+    while !text.is_char_boundary(end) {
+        end -= 1;
+    }
+    let whole = end == text.len();
+    let text = &text[..end];
+    let lines: Vec<&str> = text
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty())
+        .take(GUESS_LINES)
+        .collect();
+    if lines.len() < 2 {
+        return None;
+    }
+    let mut points: Vec<(&'static str, u32)> = Vec::new();
+    let mut add = |id: &'static str, n: u32| match points.iter_mut().find(|(i, _)| *i == id) {
+        Some((_, p)) => *p += n,
+        None => points.push((id, n)),
+    };
+    for clue in CLUES {
+        if lines.iter().any(|l| (clue.test)(l)) {
+            add(clue.id, clue.points);
+        }
+    }
+    // Whole-text shapes.
+    let all = text.trim();
+    let closed = |open: char, close: char| all.starts_with(open) && (!whole || all.ends_with(close));
+    if (closed('{', '}') || closed('[', ']')) && all.contains("\":") {
+        add("json", 4);
+    }
+    let yaml_lines = lines.iter().filter(|l| yaml_key(l)).count();
+    let nested = text
+        .lines()
+        .any(|l| l.starts_with([' ', '\t']) && (yaml_key(l.trim()) || l.trim_start().starts_with("- ")));
+    let yamlish = lines
+        .iter()
+        .all(|l| yaml_key(l) || l.starts_with("- ") || l.starts_with('#') || *l == "---");
+    if yaml_lines >= 3 && nested && yamlish {
+        add("yaml", 4);
+    }
+    let toml_keys = lines
+        .iter()
+        .filter(|l| l.split_once(" = ").is_some_and(|(k, _)| !k.contains(' ')))
+        .count();
+    if toml_keys >= 2 && lines.iter().any(|l| l.starts_with('[') && l.ends_with(']')) {
+        add("toml", 4);
+    }
+    // A language built on another gets the other's points too, when it
+    // has some of its own.
+    let get = |points: &[(&str, u32)], id: &str| points.iter().find(|(i, _)| *i == id).map_or(0, |(_, p)| *p);
+    for (child, parent) in [("cpp", "c"), ("typescript", "javascript")] {
+        let base = get(&points, parent);
+        if let Some((_, p)) = points.iter_mut().find(|(i, _)| *i == child) {
+            *p += base;
+        }
+    }
+    points.sort_by_key(|(_, p)| std::cmp::Reverse(*p));
+    match points[..] {
+        [(id, best), ..] if best >= GUESS_MIN && points.get(1).is_none_or(|(_, second)| *second < best) => {
+            by_id(id)
+        }
+        _ => None,
+    }
+}
+
+/// `tets` → `tets.py`: a note with a title of its own and no extension,
+/// whose language is known (chosen in code mode, or guessed from the
+/// text). Only a suggestion, for Save as and Rename.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+pub fn suggested_title(note: &Note) -> Option<String> {
+    let title = note.title.trim();
+    if title.is_empty() || has_extension(title) {
+        return None;
+    }
+    let language = match &note.code {
+        Some(code) => resolve(code, note),
+        None => detect(note),
+    }?;
+    Some(format!("{title}.{}", language.extension()?))
+}
+
+/// What the window offers for a tab whose text looks like code (DESIGN
+/// §10.6): the name to start from and the language. The name is the
+/// tab's own title, or for an untitled tab the first function or class
+/// in the text (`fetch` from `def fetch(url):`), or empty. Tabs whose
+/// title already has an extension get nothing.
+pub fn code_offer(note: &Note) -> Option<(String, &'static Language)> {
+    let title = note.title.trim();
+    if !title.is_empty() && has_extension(title) {
+        return None;
+    }
+    let language = match &note.code {
+        Some(code) => resolve(code, note),
+        None => detect(note),
+    }?;
+    language.extension()?;
+    let stem = if title.is_empty() {
+        name_from_text(&note.body).unwrap_or_default()
+    } else {
+        title.to_owned()
+    };
+    Some((stem, language))
+}
+
+/// `def fetch(url):` → `fetch`; also `fn`, `func`, `function`, `class`.
+fn name_from_text(text: &str) -> Option<String> {
+    const STARTS: &[&str] = &[
+        "def ",
+        "async def ",
+        "fn ",
+        "pub fn ",
+        "func ",
+        "function ",
+        "class ",
+        "pub struct ",
+        "struct ",
+    ];
+    text.lines().take(GUESS_LINES).find_map(|line| {
+        let line = line.trim_start();
+        let rest = STARTS.iter().find_map(|s| line.strip_prefix(s))?;
+        let name: String = rest
+            .chars()
+            .take_while(|c| c.is_alphanumeric() || *c == '_')
+            .take(40)
+            .collect();
+        (!name.is_empty()).then_some(name)
+    })
+}
+
+/// `notes.txt`, `x.py`: the title ends in a short extension of its own,
+/// known or not. A name chosen with an extension is left alone.
+fn has_extension(title: &str) -> bool {
+    title.rsplit_once('.').is_some_and(|(stem, ext)| {
+        !stem.is_empty() && (1..=5).contains(&ext.len()) && ext.bytes().all(|c| c.is_ascii_alphanumeric())
+    })
 }
 
 /// The language a code-mode tab uses: the chosen one, or the detected one.
@@ -1675,6 +2049,113 @@ mod tests {
             language: "go".into(),
         });
         assert_eq!(status_label(&n), "Go");
+    }
+
+    fn guess(text: &str) -> Option<&'static str> {
+        guess_from_text(text).map(|l| l.id)
+    }
+
+    #[test]
+    fn guesses_from_the_text() {
+        assert_eq!(
+            guess("import os\n\ndef hola(nombre):\n    print(f\"hola {nombre}\")\n\nhola(\"mundo\")\n"),
+            Some("python")
+        );
+        assert_eq!(guess("def suma(a, b):\n    return a + b\n"), Some("python"));
+        assert_eq!(
+            guess("#include <stdio.h>\n\nint main(void) {\n    printf(\"hi\\n\");\n    return 0;\n}\n"),
+            Some("c")
+        );
+        assert_eq!(
+            guess("#include <iostream>\nint main() {\n    std::cout << \"hi\";\n}\n"),
+            Some("cpp")
+        );
+        assert_eq!(
+            guess("use std::fs;\n\nfn main() {\n    let mut n = 0;\n    println!(\"{n}\");\n}\n"),
+            Some("rust")
+        );
+        assert_eq!(
+            guess("if [ -f ~/.bashrc ]; then\n    echo \"found\"\nfi\n"),
+            Some("bash")
+        );
+        assert_eq!(
+            guess("# Ideas\n\n- one\n- two\n\n```\ncode\n```\n"),
+            Some("markdown")
+        );
+        assert_eq!(guess("{\n  \"name\": \"x\",\n  \"n\": 1\n}\n"), Some("json"));
+        assert_eq!(
+            guess("const x = 5;\nconsole.log(x);\nconst f = (a) => {\n  return a;\n};\n"),
+            Some("javascript")
+        );
+        assert_eq!(
+            guess("interface User {\n  name: string;\n}\nconsole.log(\"x\");\n"),
+            Some("typescript")
+        );
+        assert_eq!(
+            guess("SELECT name, age FROM users\nWHERE age > 30;\n"),
+            Some("sql")
+        );
+        assert_eq!(
+            guess("package main\n\nimport \"fmt\"\n\nfunc main() {\n    fmt.Println(\"hi\")\n}\n"),
+            Some("go")
+        );
+    }
+
+    #[test]
+    fn prose_is_not_code() {
+        assert_eq!(guess(""), None);
+        assert_eq!(guess("print(1)"), None);
+        assert_eq!(
+            guess("Lista del súper\n- leche\n- pan\n- huevos\n\nMañana: llamar a mamá a las 5.\n"),
+            None
+        );
+        assert_eq!(
+            guess("Gmail\nusuario: juan@example.com\nclave: [secreto]\nnotas: la de siempre\n"),
+            None
+        );
+        assert_eq!(
+            guess("Querido diario, hoy fue un buen día.\nFuimos al parque y luego a comer.\nDe ahí regresamos a casa.\n"),
+            None
+        );
+    }
+
+    #[test]
+    fn code_offers() {
+        let mut n = Note::new(0);
+        n.body = "import requests\n\ndef fetch(url):\n    r = requests.get(url)\n    return r.json()\n\nif __name__ == \"__main__\":\n    print(fetch(\"x\"))\n".into();
+        let (stem, lang) = code_offer(&n).unwrap();
+        assert_eq!((stem.as_str(), lang.extension()), ("fetch", Some("py")));
+        n.title = "tets".into();
+        assert_eq!(code_offer(&n).unwrap().0, "tets");
+        n.title = "tets.txt".into();
+        assert!(code_offer(&n).is_none());
+        n.title = String::new();
+        n.body = "Lista del super\n- leche\n".into();
+        assert!(code_offer(&n).is_none());
+    }
+
+    #[test]
+    fn suggested_titles() {
+        let mut n = Note::new(0);
+        n.title = "tets".into();
+        n.body = "def main():\n    print(\"hi\")\n\nmain()\n".into();
+        assert_eq!(suggested_title(&n).as_deref(), Some("tets.py"));
+        // A chosen language wins over the guess.
+        n.code = Some(CodeMode {
+            language: "go".into(),
+        });
+        assert_eq!(suggested_title(&n).as_deref(), Some("tets.go"));
+        n.code = None;
+        n.title = "tets.txt".into();
+        assert_eq!(suggested_title(&n), None);
+        n.title = "main.py".into();
+        assert_eq!(suggested_title(&n), None);
+        // No title of its own: named after the first line.
+        n.title.clear();
+        assert_eq!(suggested_title(&n), None);
+        n.title = "plain".into();
+        n.body = "just some words\nand more words\n".into();
+        assert_eq!(suggested_title(&n), None);
     }
 
     #[test]

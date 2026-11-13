@@ -9,8 +9,12 @@ use std::time::{Duration, Instant};
 use heimdall_core::storage::{read_vault, save_vault, SaveKind};
 use heimdall_core::{Error, LockedVault, Profile, SecretString, Vault};
 
+use super::paths::{self, expand_home};
 use super::prompt::{self, Input};
-use crate::support::{duration_label, error_message, save_error_message, RecentVaults};
+use crate::attempts::Attempts;
+use crate::support::{duration_label, error_message, save_error_message, RecentEntry, RecentVaults};
+
+pub use super::paths::short_path;
 use crate::usb::{self, Presence, UsbKey};
 use crate::vault_lock::{LockError, VaultLock};
 
@@ -77,54 +81,81 @@ pub fn vault_name(path: &Path) -> String {
         .unwrap_or_default()
 }
 
+/// Where the vault's path came from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Source {
+    /// `--vault`
+    Option,
+    /// `$HEIMDALL_VAULT`
+    Env,
+    /// The app's recent list or the terminal's own.
+    Remembered,
+    /// Typed at the question.
+    Asked,
+}
+
+/// `--vault`, else `$HEIMDALL_VAULT`.
+pub fn given(arg: Option<PathBuf>) -> Option<(PathBuf, Source)> {
+    match arg {
+        Some(p) => Some((expand_home(&p), Source::Option)),
+        None => std::env::var_os("HEIMDALL_VAULT")
+            .filter(|v| !v.is_empty())
+            .map(|p| (expand_home(Path::new(&p)), Source::Env)),
+    }
+}
+
+/// The vaults this computer remembers, newest first: the app's recent
+/// list and the terminal's own (DESIGN §17.1). Only files that exist.
+pub fn remembered() -> Vec<RecentEntry> {
+    let mut all = RecentVaults::load().entries;
+    all.extend(RecentVaults::terminal().entries);
+    all.sort_by_key(|e| std::cmp::Reverse(e.opened));
+    let mut seen = Vec::new();
+    all.retain(|e| {
+        let new = e.path.is_file() && !seen.contains(&e.path);
+        seen.push(e.path.clone());
+        new
+    });
+    all
+}
+
 /// The vault to use: `--vault`, then `$HEIMDALL_VAULT`, then the most
-/// recent one the app remembers, then asking. Hardened and Paranoid vaults
-/// are not remembered (DESIGN §6.1), so those need one of the first two.
-pub fn locate(arg: Option<PathBuf>) -> Result<PathBuf, Fail> {
-    let chosen = arg
-        .or_else(|| {
-            std::env::var_os("HEIMDALL_VAULT")
-                .filter(|v| !v.is_empty())
-                .map(PathBuf::from)
-        })
-        .map(|p| expand_home(&p))
-        .or_else(|| {
-            RecentVaults::load()
-                .entries
-                .into_iter()
-                .map(|e| e.path)
-                .find(|p| p.is_file())
-        });
-    let path = match chosen {
-        Some(p) => p,
-        None => {
-            eprintln!("[heimdall] No vault opened recently. Which one? (--vault <path> or $HEIMDALL_VAULT skip this)");
-            match prompt::read_line(" :: Vault file : ", false, None, &mut || None)? {
-                Input::Line(line) if !line.trim().is_empty() => expand_home(Path::new(line.trim())),
-                _ => return Err(Fail::Cancelled),
-            }
-        }
+/// recent one remembered, then asking. Hardened and Paranoid vaults are
+/// remembered only if the user asked for it in the terminal.
+pub fn locate(arg: Option<PathBuf>) -> Result<(PathBuf, Source), Fail> {
+    if let Some(given) = given(arg) {
+        return check(given);
+    }
+    if let Some(entry) = remembered().into_iter().next() {
+        return Ok((entry.path, Source::Remembered));
+    }
+    eprintln!(
+        "[heimdall] No vault opened recently. Which one? (--vault <path> or $HEIMDALL_VAULT skip this)"
+    );
+    ask_path()
+}
+
+/// ` :: Vault file : `, with Tab completing folders and `.heim` files.
+pub fn ask_path() -> Result<(PathBuf, Source), Fail> {
+    let complete = |typed: &str| -> Vec<String> {
+        paths::complete(typed.trim_start(), |p| p.extension().is_some_and(|e| e == "heim"))
     };
+    let complete: prompt::Complete = &complete;
+    match prompt::read_line(" :: Vault file : ", false, Some(complete), &mut || {
+        super::hung_up().then_some(LockEvent::HungUp)
+    })? {
+        Input::Line(line) if !line.trim().is_empty() => {
+            check((expand_home(Path::new(line.trim())), Source::Asked))
+        }
+        _ => Err(Fail::Cancelled),
+    }
+}
+
+fn check((path, source): (PathBuf, Source)) -> Result<(PathBuf, Source), Fail> {
     if !path.is_file() {
         return Err(Fail::Message(format!("There is no vault at {}.", path.display())));
     }
-    Ok(path)
-}
-
-fn expand_home(path: &Path) -> PathBuf {
-    match (path.strip_prefix("~"), std::env::var_os("HOME")) {
-        (Ok(rest), Some(home)) => Path::new(&home).join(rest),
-        _ => path.to_owned(),
-    }
-}
-
-/// `~/vaults/personal.heim`
-pub fn short_path(path: &Path) -> String {
-    let home = std::env::var_os("HOME").map(PathBuf::from);
-    match home.and_then(|h| path.strip_prefix(h).ok().map(Path::to_owned)) {
-        Some(rest) => format!("~/{}", rest.display()),
-        None => path.display().to_string(),
-    }
+    Ok((path, source))
 }
 
 const TRIES: usize = 3;
@@ -146,8 +177,19 @@ impl TermSession {
             }
         };
 
+        // Too many wrong passwords: no question until the wait is over
+        // (DESIGN §9.1).
+        let attempts = Attempts::for_vault(locked.vault_id());
+        let status = attempts.status();
+        if let Some((first, second)) = status.locked_message(&name) {
+            return Err(Fail::Message(format!("{first}\n           {second}")));
+        }
+
         // The questions are wiped once the vault opens (DESIGN §17.3).
         prompt::forget_rows();
+        if let Some(warning) = status.warning(&name) {
+            prompt::say(&format!("[heimdall] {warning}"));
+        }
         let key = Self::find_key(&locked, &name)?;
         let mut vault = None;
         for _ in 0..TRIES {
@@ -167,7 +209,14 @@ impl TermSession {
                     vault = Some(v);
                     break;
                 }
-                Err(Error::WrongPassword) => prompt::say("[heimdall] Wrong password."),
+                Err(Error::WrongPassword) => {
+                    let status = attempts.failed();
+                    prompt::say(&format!("[heimdall] {}", status.after_wrong(&name)));
+                    if status.is_locked() {
+                        prompt::forget_rows();
+                        return Err(Fail::Cancelled);
+                    }
+                }
                 Err(e) => {
                     prompt::forget_rows();
                     return Err(Fail::Message(error_message(&e)));
@@ -179,6 +228,7 @@ impl TermSession {
             return Err(Fail::Cancelled);
         };
         prompt::erase_rows();
+        attempts.succeeded(&vault.content.security);
 
         let (address, len) = vault.key_memory();
         heimdall_platform::lock_memory(address, len);
@@ -190,6 +240,10 @@ impl TermSession {
             recent.touch(&path);
         } else {
             recent.remove(&path);
+        }
+        let mut terminal = RecentVaults::terminal();
+        if terminal.contains(&path) {
+            terminal.touch(&path);
         }
         // Presence mode: only while the vault can't be opened without the key (§8.3).
         let presence = key

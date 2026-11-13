@@ -14,8 +14,10 @@ use crate::format::SlotId;
 /// [`EditorSettings::code_tip`], the spell check language and the personal
 /// dictionary; 4 added the secret clipboard timer, locking with Windows and
 /// the paste detector settings (v0.4); 5 added the export password setting
-/// and the last backup date (v1.0). Versions 1 to 4 are still read.
-pub const CONTENT_VERSION: u16 = 5;
+/// and the last backup date (v1.0); 6 added the wrong password limit,
+/// export from the terminal, code mode from the file extension and
+/// [`Note::code_off`] (v1.3.1). Versions 1 to 5 are still read.
+pub const CONTENT_VERSION: u16 = 6;
 /// Plaintext is padded to a multiple of this (DESIGN §5.3).
 pub const PAD_BLOCK: usize = 4096;
 /// Notes stay in the trash this long before being purged (DESIGN §10.3).
@@ -57,6 +59,13 @@ pub struct SecuritySettings {
     /// Ask for the vault password before exporting (DESIGN §10.9). Only
     /// Basic can turn it off.
     pub ask_password_export: bool,
+    /// Wrong passwords in a row before the vault waits (DESIGN §9.1).
+    /// `None` = no limit.
+    pub max_tries: Option<u8>,
+    /// The first wait; each one after it in a row is twice as long.
+    pub lockout_s: u32,
+    /// `^E` in the terminal writes a note to a plain file (DESIGN §17.4).
+    pub terminal_export: bool,
 }
 
 impl SecuritySettings {
@@ -72,6 +81,9 @@ impl SecuritySettings {
                 lock_on_windows_lock: true,
                 remember_recent: true,
                 ask_password_export: true,
+                max_tries: Some(5),
+                lockout_s: 5 * 60,
+                terminal_export: true,
             },
             Profile::Hardened => Self {
                 profile,
@@ -83,6 +95,9 @@ impl SecuritySettings {
                 lock_on_windows_lock: true,
                 remember_recent: false,
                 ask_password_export: true,
+                max_tries: Some(5),
+                lockout_s: 15 * 60,
+                terminal_export: true,
             },
             Profile::Paranoid => Self {
                 profile,
@@ -94,6 +109,9 @@ impl SecuritySettings {
                 lock_on_windows_lock: true,
                 remember_recent: false,
                 ask_password_export: true,
+                max_tries: Some(3),
+                lockout_s: 30 * 60,
+                terminal_export: false,
             },
         }
     }
@@ -154,6 +172,9 @@ pub struct EditorSettings {
     pub mask_pasted: bool,
     /// Explain the paste detector the next time it masks something.
     pub secret_tip: bool,
+    /// A note named like a source file (`x.py`, `notes.md`) is in code
+    /// mode, unless it was turned off by hand (DESIGN §10.6).
+    pub code_from_extension: bool,
 }
 
 impl Default for EditorSettings {
@@ -174,6 +195,7 @@ impl Default for EditorSettings {
             code_tip: true,
             mask_pasted: true,
             secret_tip: true,
+            code_from_extension: true,
         }
     }
 }
@@ -202,6 +224,9 @@ pub struct Note {
     /// Word wrap for this tab (Alt+Z). `None` = the global setting, or off
     /// in code mode.
     pub wrap: Option<bool>,
+    /// Code mode was turned off by hand: the title's extension doesn't
+    /// turn it on again (DESIGN §10.6).
+    pub code_off: bool,
 }
 
 impl Note {
@@ -216,6 +241,7 @@ impl Note {
             deleted_at: None,
             code: None,
             wrap: None,
+            code_off: false,
         }
     }
 
@@ -322,6 +348,152 @@ mod legacy {
                 deleted_at: n.deleted_at,
                 code: None,
                 wrap: None,
+                code_off: false,
+            }
+        }
+    }
+
+    /// A note of versions 3 to 5: no `code_off`.
+    #[derive(Serialize, Deserialize)]
+    pub(super) struct NoteV3 {
+        pub id: Uuid,
+        pub title: String,
+        pub body: String,
+        pub created: Timestamp,
+        pub modified: Timestamp,
+        pub cursor: u64,
+        pub deleted_at: Option<Timestamp>,
+        pub code: Option<CodeMode>,
+        pub wrap: Option<bool>,
+    }
+
+    impl Drop for NoteV3 {
+        fn drop(&mut self) {
+            self.title.zeroize();
+            self.body.zeroize();
+        }
+    }
+
+    impl From<NoteV3> for Note {
+        fn from(mut n: NoteV3) -> Self {
+            Self {
+                id: n.id,
+                title: std::mem::take(&mut n.title),
+                body: std::mem::take(&mut n.body),
+                created: n.created,
+                modified: n.modified,
+                cursor: n.cursor,
+                deleted_at: n.deleted_at,
+                code: n.code.take(),
+                wrap: n.wrap,
+                code_off: false,
+            }
+        }
+    }
+
+    fn notes(old: Vec<NoteV3>) -> Vec<Note> {
+        old.into_iter().map(Note::from).collect()
+    }
+
+    /// Editor settings of versions 4 and 5: no `code_from_extension`.
+    #[derive(Serialize, Deserialize)]
+    pub(super) struct EditorSettingsV5 {
+        pub font: Font,
+        pub font_size: u8,
+        pub tab_inserts: TabInsert,
+        pub line_ending: LineEnding,
+        pub word_wrap: bool,
+        pub line_numbers: bool,
+        pub status_bar: bool,
+        pub spell_check: bool,
+        pub spell_language: SpellLanguage,
+        pub autosave: bool,
+        pub reopen_tabs: bool,
+        pub zoom_percent: u16,
+        pub code_tip: bool,
+        pub mask_pasted: bool,
+        pub secret_tip: bool,
+    }
+
+    impl From<EditorSettingsV5> for EditorSettings {
+        fn from(e: EditorSettingsV5) -> Self {
+            Self {
+                font: e.font,
+                font_size: e.font_size,
+                tab_inserts: e.tab_inserts,
+                line_ending: e.line_ending,
+                word_wrap: e.word_wrap,
+                line_numbers: e.line_numbers,
+                status_bar: e.status_bar,
+                spell_check: e.spell_check,
+                spell_language: e.spell_language,
+                autosave: e.autosave,
+                reopen_tabs: e.reopen_tabs,
+                zoom_percent: e.zoom_percent,
+                code_tip: e.code_tip,
+                mask_pasted: e.mask_pasted,
+                secret_tip: e.secret_tip,
+                code_from_extension: true,
+            }
+        }
+    }
+
+    /// Security settings of version 5: no password limit, no terminal export.
+    #[derive(Serialize, Deserialize)]
+    pub(super) struct SecuritySettingsV5 {
+        pub profile: Profile,
+        pub lock_after_s: Option<u32>,
+        pub clipboard_clear_s: u32,
+        pub secret_clear_s: u32,
+        pub exclude_from_capture: bool,
+        pub lock_on_minimize: bool,
+        pub lock_on_windows_lock: bool,
+        pub remember_recent: bool,
+        pub ask_password_export: bool,
+    }
+
+    impl From<SecuritySettingsV5> for SecuritySettings {
+        /// The new settings take the profile's defaults.
+        fn from(s: SecuritySettingsV5) -> Self {
+            Self {
+                profile: s.profile,
+                lock_after_s: s.lock_after_s,
+                clipboard_clear_s: s.clipboard_clear_s,
+                secret_clear_s: s.secret_clear_s,
+                exclude_from_capture: s.exclude_from_capture,
+                lock_on_minimize: s.lock_on_minimize,
+                lock_on_windows_lock: s.lock_on_windows_lock,
+                remember_recent: s.remember_recent,
+                ask_password_export: s.ask_password_export,
+                ..Self::defaults_for(s.profile)
+            }
+        }
+    }
+
+    /// Version 5 (v1.0 to v1.3).
+    #[derive(Serialize, Deserialize)]
+    pub(super) struct ContentV5 {
+        pub security: SecuritySettingsV5,
+        pub editor: EditorSettingsV5,
+        pub notes: Vec<NoteV3>,
+        pub active_note: Option<Uuid>,
+        pub trash: Vec<NoteV3>,
+        pub access: Vec<AccessLabel>,
+        pub dictionary: Vec<String>,
+        pub last_backup: Option<Timestamp>,
+    }
+
+    impl From<ContentV5> for Content {
+        fn from(v5: ContentV5) -> Self {
+            Self {
+                security: v5.security.into(),
+                editor: v5.editor.into(),
+                notes: notes(v5.notes),
+                active_note: v5.active_note,
+                trash: notes(v5.trash),
+                access: v5.access,
+                dictionary: v5.dictionary,
+                last_backup: v5.last_backup,
             }
         }
     }
@@ -468,40 +640,40 @@ mod legacy {
     pub(super) struct ContentV3 {
         pub security: SecuritySettingsV1,
         pub editor: EditorSettingsV3,
-        pub notes: Vec<Note>,
+        pub notes: Vec<NoteV3>,
         pub active_note: Option<Uuid>,
-        pub trash: Vec<Note>,
+        pub trash: Vec<NoteV3>,
         pub access: Vec<AccessLabel>,
         pub dictionary: Vec<String>,
     }
 
     impl From<ContentV2> for Content {
         fn from(v2: ContentV2) -> Self {
-            ContentV3 {
-                security: v2.security,
-                editor: v2.editor.into(),
+            Self {
+                security: v2.security.into(),
+                editor: EditorSettingsV3::from(v2.editor).into(),
                 notes: v2.notes.into_iter().map(Note::from).collect(),
                 active_note: v2.active_note,
                 trash: v2.trash.into_iter().map(Note::from).collect(),
                 access: v2.access,
                 dictionary: Vec::new(),
+                last_backup: None,
             }
-            .into()
         }
     }
 
     impl From<ContentV3> for Content {
         fn from(v3: ContentV3) -> Self {
-            ContentV4 {
+            Self {
                 security: v3.security.into(),
                 editor: v3.editor.into(),
-                notes: v3.notes,
+                notes: notes(v3.notes),
                 active_note: v3.active_note,
-                trash: v3.trash,
+                trash: notes(v3.trash),
                 access: v3.access,
                 dictionary: v3.dictionary,
+                last_backup: None,
             }
-            .into()
         }
     }
 
@@ -518,22 +690,6 @@ mod legacy {
         pub remember_recent: bool,
     }
 
-    impl From<SecuritySettingsV1> for SecuritySettingsV4 {
-        fn from(s: SecuritySettingsV1) -> Self {
-            let s = SecuritySettings::from(s);
-            Self {
-                profile: s.profile,
-                lock_after_s: s.lock_after_s,
-                clipboard_clear_s: s.clipboard_clear_s,
-                secret_clear_s: s.secret_clear_s,
-                exclude_from_capture: s.exclude_from_capture,
-                lock_on_minimize: s.lock_on_minimize,
-                lock_on_windows_lock: s.lock_on_windows_lock,
-                remember_recent: s.remember_recent,
-            }
-        }
-    }
-
     impl From<SecuritySettingsV4> for SecuritySettings {
         fn from(s: SecuritySettingsV4) -> Self {
             Self {
@@ -545,7 +701,7 @@ mod legacy {
                 lock_on_minimize: s.lock_on_minimize,
                 lock_on_windows_lock: s.lock_on_windows_lock,
                 remember_recent: s.remember_recent,
-                ask_password_export: true,
+                ..Self::defaults_for(s.profile)
             }
         }
     }
@@ -554,10 +710,10 @@ mod legacy {
     #[derive(Serialize, Deserialize)]
     pub(super) struct ContentV4 {
         pub security: SecuritySettingsV4,
-        pub editor: EditorSettings,
-        pub notes: Vec<Note>,
+        pub editor: EditorSettingsV5,
+        pub notes: Vec<NoteV3>,
         pub active_note: Option<Uuid>,
-        pub trash: Vec<Note>,
+        pub trash: Vec<NoteV3>,
         pub access: Vec<AccessLabel>,
         pub dictionary: Vec<String>,
     }
@@ -566,10 +722,10 @@ mod legacy {
         fn from(v4: ContentV4) -> Self {
             Self {
                 security: v4.security.into(),
-                editor: v4.editor,
-                notes: v4.notes,
+                editor: v4.editor.into(),
+                notes: notes(v4.notes),
                 active_note: v4.active_note,
-                trash: v4.trash,
+                trash: notes(v4.trash),
                 access: v4.access,
                 dictionary: v4.dictionary,
                 last_backup: None,
@@ -866,6 +1022,7 @@ impl Content {
             2 => postcard::take_from_bytes::<legacy::ContentV2>(rest).map(|(c, r)| (Content::from(c), r)),
             3 => postcard::take_from_bytes::<legacy::ContentV3>(rest).map(|(c, r)| (Content::from(c), r)),
             4 => postcard::take_from_bytes::<legacy::ContentV4>(rest).map(|(c, r)| (Content::from(c), r)),
+            5 => postcard::take_from_bytes::<legacy::ContentV5>(rest).map(|(c, r)| (Content::from(c), r)),
             CONTENT_VERSION => postcard::take_from_bytes::<Content>(rest),
             other => return Err(Error::UnsupportedContentVersion(other)),
         }
@@ -923,6 +1080,40 @@ mod tests {
             modified: n.modified,
             cursor: n.cursor,
             deleted_at: n.deleted_at,
+        }
+    }
+
+    fn v3_note(n: &Note) -> legacy::NoteV3 {
+        legacy::NoteV3 {
+            id: n.id,
+            title: n.title.clone(),
+            body: n.body.clone(),
+            created: n.created,
+            modified: n.modified,
+            cursor: n.cursor,
+            deleted_at: n.deleted_at,
+            code: n.code.clone(),
+            wrap: n.wrap,
+        }
+    }
+
+    fn v5_editor(e: &EditorSettings) -> legacy::EditorSettingsV5 {
+        legacy::EditorSettingsV5 {
+            font: e.font,
+            font_size: e.font_size,
+            tab_inserts: e.tab_inserts,
+            line_ending: e.line_ending,
+            word_wrap: e.word_wrap,
+            line_numbers: e.line_numbers,
+            status_bar: e.status_bar,
+            spell_check: e.spell_check,
+            spell_language: e.spell_language,
+            autosave: e.autosave,
+            reopen_tabs: e.reopen_tabs,
+            zoom_percent: e.zoom_percent,
+            code_tip: e.code_tip,
+            mask_pasted: e.mask_pasted,
+            secret_tip: e.secret_tip,
         }
     }
 
@@ -985,10 +1176,10 @@ mod tests {
         ));
 
         let mut plain = c.to_padded_plaintext().unwrap().to_vec();
-        plain[4] = 6; // version varint
+        plain[4] = 7; // version varint
         assert!(matches!(
             Content::from_padded_plaintext(&plain),
-            Err(Error::UnsupportedContentVersion(6))
+            Err(Error::UnsupportedContentVersion(7))
         ));
 
         assert!(Content::from_padded_plaintext(&[0; 10]).is_err());
@@ -1071,9 +1262,9 @@ mod tests {
                 zoom_percent: e.zoom_percent,
                 code_tip: e.code_tip,
             },
-            notes: c.notes.clone(),
+            notes: c.notes.iter().map(v3_note).collect(),
             active_note: c.active_note,
-            trash: c.trash.clone(),
+            trash: c.trash.iter().map(v3_note).collect(),
             access: c.access.clone(),
             dictionary: c.dictionary.clone(),
         };
@@ -1106,10 +1297,10 @@ mod tests {
                 lock_on_windows_lock: s.lock_on_windows_lock,
                 remember_recent: s.remember_recent,
             },
-            editor: c.editor.clone(),
-            notes: c.notes.clone(),
+            editor: v5_editor(&c.editor),
+            notes: c.notes.iter().map(v3_note).collect(),
             active_note: c.active_note,
-            trash: c.trash.clone(),
+            trash: c.trash.iter().map(v3_note).collect(),
             access: c.access.clone(),
             dictionary: c.dictionary.clone(),
         };
@@ -1118,6 +1309,58 @@ mod tests {
         assert_eq!(read, c);
         assert!(read.security.ask_password_export);
         assert_eq!(read.last_backup, None);
+    }
+
+    /// A vault saved by v1.0 to v1.3 opens with the profile's password
+    /// limit, code mode from the extension on, and no note marked
+    /// `code_off`.
+    #[test]
+    fn reads_version_5() {
+        let mut c = sample_v3();
+        c.security = SecuritySettings::defaults_for(Profile::Paranoid);
+        c.security.ask_password_export = true;
+        c.last_backup = Some(77);
+        let s = &c.security;
+        let v5 = legacy::ContentV5 {
+            security: legacy::SecuritySettingsV5 {
+                profile: s.profile,
+                lock_after_s: s.lock_after_s,
+                clipboard_clear_s: s.clipboard_clear_s,
+                secret_clear_s: s.secret_clear_s,
+                exclude_from_capture: s.exclude_from_capture,
+                lock_on_minimize: s.lock_on_minimize,
+                lock_on_windows_lock: s.lock_on_windows_lock,
+                remember_recent: s.remember_recent,
+                ask_password_export: s.ask_password_export,
+            },
+            editor: v5_editor(&c.editor),
+            notes: c.notes.iter().map(v3_note).collect(),
+            active_note: c.active_note,
+            trash: c.trash.iter().map(v3_note).collect(),
+            access: c.access.clone(),
+            dictionary: c.dictionary.clone(),
+            last_backup: c.last_backup,
+        };
+        let plain = padded(5, &postcard::to_allocvec(&v5).unwrap());
+        let read = Content::from_padded_plaintext(&plain).unwrap();
+        assert_eq!(read, c);
+        assert_eq!(read.security.max_tries, Some(3));
+        assert_eq!(read.security.lockout_s, 30 * 60);
+        assert!(!read.security.terminal_export);
+        assert!(read.editor.code_from_extension);
+        assert!(read.notes.iter().all(|n| !n.code_off));
+    }
+
+    #[test]
+    fn version_6_fields_roundtrip() {
+        let mut c = sample_v3();
+        c.security.max_tries = None;
+        c.security.lockout_s = 60;
+        c.security.terminal_export = false;
+        c.editor.code_from_extension = false;
+        c.notes[1].code_off = true;
+        let plain = c.to_padded_plaintext().unwrap();
+        assert_eq!(Content::from_padded_plaintext(&plain).unwrap(), c);
     }
 
     #[test]

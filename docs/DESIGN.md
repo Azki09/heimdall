@@ -269,7 +269,7 @@ Decisiones que este documento dejaba abiertas y que el código fija:
 
 ### 5.6 Compatibilidad: el formato queda congelado
 
-Desde la v1.0, **formato 1 con contenido versión 4 y 5** es un compromiso: toda versión futura de Heimdall debe abrir esas vaults y leer exactamente lo mismo. La v1.0 escribe la versión 5 (§10.9 agregó el ajuste de contraseña al exportar y la fecha del último respaldo).
+Desde la v1.0, **formato 1 con contenido versión 4 y 5** es un compromiso: toda versión futura de Heimdall debe abrir esas vaults y leer exactamente lo mismo. La v1.0 escribe la versión 5 (§10.9 agregó el ajuste de contraseña al exportar y la fecha del último respaldo). La v1.3.1 escribe la **versión 6**: límite de contraseñas incorrectas (§9.1), exportar desde la terminal (§17.5), modo código por extensión y `Note.code_off` (§10.6). Las versiones 1 a 5 se siguen leyendo; los campos nuevos toman los valores del perfil. La versión 6 también queda congelada con su fixture `basic-v6.heim` (`tests/format_v1.rs`).
 
 - **Lo que no cambia nunca** en el formato 1: la cabecera (§5.1), los tipos de slot 1, 2 y 3 (§5.2), las primitivas y sus parámetros (§4.2, §4.3), el keyfile `.bifrost` y la forma del contenido en claro (§5.5).
 - **Para agregar datos cifrados** se sube la versión del contenido (5, 6…) y se conserva el lector de todas las anteriores, como ya se hizo de la 1 a la 4. Una vault vieja se abre y, al guardarse, pasa a la versión nueva.
@@ -406,6 +406,24 @@ El slot de recuperación **no requiere USB**. Es intencional: si lo requiriera, 
 5. **Olvidé mi contraseña:** "Usar código de recuperación" → 12 palabras → **obliga** a crear una contraseña nueva (y re-enrolar el USB si aplica) → rota la MK → muestra un código de recuperación nuevo para imprimir y confirmar.
 6. **Gestionar accesos:** ver slots activos, agregar USB, revocar USB, regenerar el código de recuperación, "rotar claves ahora". Cada acción indica si va a rotar la MK y qué factores va a pedir.
 
+### 9.1 Límite de contraseñas incorrectas (v1.3.1)
+
+Pedido por el usuario el 2026-11-12. Tras N contraseñas incorrectas seguidas, la vault espera antes de aceptar otro intento, en la ventana y en la terminal.
+
+| Perfil | Intentos | Primera espera |
+|---|---|---|
+| Basic | 5 | 5 min |
+| Hardened | 5 | 15 min |
+| Paranoid | 3 | 30 min |
+
+- Cada espera seguida dura el **doble** que la anterior, hasta 24 h. Al terminar una espera queda **un** intento antes de la siguiente. La contraseña correcta (o el código de recuperación) pone todo a cero.
+- Se dice cuántos intentos quedan: nada en la primera pregunta; después de un error, `Wrong password. 4 tries left.`, y en el último `Last try before a 5 min wait.` Si un comando anterior falló, la terminal lo avisa antes de preguntar. Durante la espera no se pide la contraseña: `Vault "x" is locked after 5 wrong passwords. Try again in 4:12.`
+- **Cambiar la hora no sirve.** La espera se mide con el reloj desde el arranque del sistema (`CLOCK_BOOTTIME` en Linux, `GetTickCount64` en Windows, `heimdall_platform::boot_clock_ms`), que cuenta la suspensión y no se puede adelantar sin reiniciar. Si se reinicia, ese reloj vuelve a 0: Heimdall lo nota (el reloj es menor que cuando empezó la espera) y **la espera empieza de nuevo**. La región y la zona horaria no intervienen.
+- **El código de recuperación nunca se bloquea:** es la salida si se olvidó la contraseña (12 palabras BIP39 no se adivinan).
+- **Dónde vive:** `attempts.txt` en la carpeta de configuración, una línea por vault con un hash del `vault_id` (nunca el nombre ni la ruta) y los contadores. El límite está en los ajustes cifrados, que no se pueden leer antes de abrir, así que cada apertura correcta lo copia ahí; una vault nunca abierta en el equipo usa los valores de Basic. Una vault de Basic sin fallos no deja línea.
+- **Límites, dichos sin rodeos:** solo frena intentos en este equipo y con Heimdall. Quien copie el `.heim` puede probar contraseñas con su propio programa, y quien borre `attempts.txt` reinicia el contador. Lo que protege de verdad es Argon2id y una buena contraseña. No hay opción de borrar la vault tras N fallos: un error propio sería perderlo todo.
+- **Ajustes** (*Settings → Security*): *Wrong passwords before waiting* (3, 5, 10 o *No limit*) y *First wait* (1 min a 1 h). En Hardened y Paranoid, cambiarlos pide la contraseña. Código: `attempts.rs`.
+
 ---
 
 ## 10. Notas y pestañas
@@ -430,6 +448,7 @@ El modelo es el **Bloc de notas de Windows 11**: cada nota es una pestaña. Quie
 | Ajuste de línea | Alt+Z | Activa o desactiva el ajuste de línea **solo en la pestaña actual** |
 | Menú del texto | Clic derecho / Shift+F10 / tecla Menú | *Cut*, *Copy*, *Paste*, *Select all* en cualquier parte del texto, más *Mark as secret* sobre una selección y *Reveal all* en Basic. Sobre un secreto o una palabra mal escrita se abre su propio menú (§11.1, §10.8). Con el teclado se abre en el cursor (§10.10) |
 | Menú ⌄ de pestañas | Ctrl+Shift+E / botón `⌄` | Las pestañas que no caben, exportar, importar y copia de respaldo (§10.9) |
+| Exportar la pestaña | Ctrl+Shift+S / botón *Export* | Texto plano de la pestaña activa (§10.9) |
 | Cambiar de zona | F6 / Shift+F6 | Barra de pestañas → texto → barra de estado (§10.10) |
 
 Todos los atajos aparecen en *Settings → Shortcuts*.
@@ -522,12 +541,20 @@ Qué muestra:
 - **Ícono `</>`** en la pestaña, para distinguir las pestañas de código.
 - **Barra de estado:** `Ln, Col`, `Spaces: 4` (según el ajuste de la tecla Tab) y el **lenguaje**. Al pulsar el lenguaje se abre un selector con búsqueda:
   - *Plain text* sale del modo código.
-  - *Auto-detect* deduce el lenguaje de la extensión del título de la pestaña (`backup.rs`), o si no, del `#!` de la primera línea o de `<?xml` / `<!doctype html>`.
+  - *Auto-detect* deduce el lenguaje de la extensión del título de la pestaña (`backup.rs`), o si no, del `#!` de la primera línea o de `<?xml` / `<!doctype html>`, y si no, de pistas en el texto (ver *Lenguaje por el contenido*, abajo).
   - 19 lenguajes incluidos: Bash, C, C++, C#, CSS, Go, HTML, Java, JavaScript, JSON, Markdown, PowerShell, Python, Rust, SQL, TOML, TypeScript, XML y YAML.
 - **Ajuste de línea desactivado** por defecto en modo código; Alt+Z lo cambia en esa pestaña.
 - La fuente es monoespaciada aunque el ajuste global sea Inter o Segoe UI.
 
 No hay plegado de código (*folding*).
+
+**Modo código por extensión (v1.3.1).** Una nota cuyo **título propio** tiene la extensión de un lenguaje (`main.py`, `notas.md`, `index.html`) está en modo código, en la ventana y en la terminal, también las que ya existían y Markdown. Si se apaga a mano (Ctrl+Shift+M, *Plain text* o `^T`) se guarda `Note.code_off` y la extensión ya no lo vuelve a encender; renombrarla a otra extensión de código sí (es un motivo nuevo). Un título tomado de la primera línea no cuenta. Se desactiva en *Settings → Editor → Code mode from the file extension* (activado por defecto); la terminal respeta ese ajuste. Funciones: `code::by_title`, `code::auto_code`.
+
+**Lenguaje por el contenido (v1.3.1).** Pedido por el usuario el 2026-11-12: una nota `tets` con Python no recibía ninguna sugerencia. `code::guess_from_text` mira las primeras 50 líneas no vacías (como mucho 8 KB) y suma puntos por pistas: Python (`def x():`, `from x import`, `elif`, `self.`), C y C++ (`#include`, `printf(`, `std::`), Rust (`fn main()`, `use std::`, `let mut`), JavaScript y TypeScript (`console.log(`, `=>`, `: string`), Bash (`if [ `, `fi`, `; then`), PowerShell (`Write-Host`, `Get-`), HTML, SQL, Go, Java, C#, Markdown (encabezados `# `, bloques ```` ``` ````), CSS, y por la forma del texto entero JSON, YAML y TOML. Cada pista cuenta una vez por nota (diez líneas `- x` son una pista, no diez). Gana el lenguaje con **al menos 3 puntos y más que cualquier otro**; con empate o menos, nada: el texto normal (listas, diarios, `usuario: x`) no es código. C++ y TypeScript suman los puntos de C y JavaScript solo si tienen pistas propias. Se usa como último recurso de *Auto-detect* (después de extensión, `#!` y XML/HTML).
+
+**Sugerir la extensión (v1.3.1).** Solo sugiere: **nunca enciende el modo código por sí sola**. En la terminal, `code::suggested_title` da `tets.py` cuando la nota tiene **título propio sin extensión** (ni conocida ni otra: `notas.txt` se deja en paz) y el lenguaje se sabe (el elegido en modo código, o el detectado); ver §17.4.
+
+En la ventana (pedido del usuario el 2026-11-12, tras probar: pegó Python en una pestaña sin nombre y no salió nada) `code::code_offer` da **nombre y lenguaje**: el título propio, o en una pestaña **sin título** la primera función o clase del texto (`def fetch(` → `fetch`), o vacío. La tarjeta sale **cuando la escritura se detiene 1,5 s** (también tras pegar) o al guardar, abajo a la derecha con el estilo del aviso de pestañas nuevas: "Looks like Python code", una línea que dice si el modo código se encenderá, y **dos campos editables, nombre y extensión** (`[fetch] . [py]`), porque la detección puede equivocarse. *Rename* (o Enter en un campo) se activa con nombre no vacío y extensión de 1–10 letras o dígitos; renombra como el doble clic (título único, borra `code_off`) y el modo código por extensión hace el resto si está activado. *Not now* y `×` cierran. **Una vez por pestaña** mientras la bóveda está abierta (no se guarda); desaparece al cambiar de pestaña. Solo se mira el texto cuando cambió (pestaña, longitud, hora de edición, último guardado).
 
 **Aviso en pestañas nuevas.** Al abrir una pestaña (Ctrl+T o `+`) aparece abajo a la derecha una tarjeta pequeña: "Writing code in this tab?", el atajo Ctrl+Shift+M, una casilla *Don't show again* y el enlace *All shortcuts* (abre *Settings → Shortcuts*). Se cierra sola a los 5 s, con una barra de progreso (se pausa con el ratón encima), o con `×`. *Don't show again* se guarda en la vault y se puede reactivar en *Settings → Editor*.
 
@@ -557,6 +584,8 @@ Lo buscado vive solo en memoria y se borra (zeroize) al cerrar la barra, el pane
 - Motor: `spellbook`, en Rust puro, sin red ni archivos.
 
 ### 10.9 Exportar, importar y copia de respaldo
+
+**Botón Export (v1.3.1).** Pedido del usuario el 2026-11-12: exportar a texto plano siempre a la vista. Botón *Export* arriba a la derecha (junto a Settings y Lock), en cualquier pestaña, y **Ctrl+Shift+S** (se mira antes que Ctrl+S). Exporta **la pestaña activa** con el mismo flujo de "Export as plain text…" pero sin la lista de notas: paso *Warning* (y la contraseña: siempre en Hardened y Paranoid; en Basic según "Ask for the password", encendido por defecto), luego *Secrets* solo si la nota tiene secretos, y el cuadro de guardar con el nombre ya puesto (`tets.py`, `notas.md`). En Paranoid funciona igual: el permiso de Settings → Vault es solo para `^E` en la terminal.
 
 Diseño cerrado el 2026-11-07 (v1.0). Son cinco acciones:
 
@@ -790,10 +819,11 @@ Si una señal de D-Bus no llega (un contenedor sin logind, un escritorio mínimo
 | **v1.1** | YubiKey/FIDO2 |
 | **v1.0** | Formato congelado (§5.6), **menú contextual general** (clic derecho con Cut / Copy / Paste / Select all en cualquier parte del texto), copia de respaldo manual, exportar e importar, cifrado y en texto plano (§10.9) |
 | **v1.2** | Linux (§13.1) |
-| **v1.3** | Modo terminal sencillo, solo Linux (§17), y bloqueo exclusivo de la bóveda entre ventanas y terminal. La terminal no recibe más funciones |
-| **v1.4** | Generador de contraseñas: inserta la contraseña directo como secreto `{*…*}`, sin pasar por el portapapeles |
+| **v1.3** | Modo terminal sencillo, solo Linux (§17), y bloqueo exclusivo de la bóveda entre ventanas y terminal. La 1.3.1 trae lo que pidió el usuario tras probarla: elegir bóveda, límite de contraseñas incorrectas (§9.1), *Save as* y exportar, comandos en la lista y sugerir la extensión |
+| **v1.4** | Modo terminal en Windows: lo mismo que en Linux (diseño por decidir con el usuario; Windows necesita un ejecutable de consola aparte o adjuntar una consola) |
+| **v1.5** | Generador de contraseñas: inserta la contraseña directo como secreto `{*…*}`, sin pasar por el portapapeles |
 | **v2.0 — App completa** | Windows y Linux: menú lateral (el generador se muda ahí), etiquetas, notas fijadas, quizás historial de notas. Cambio de formato del contenido: decidir antes cómo se comporta una bóveda 2.0 abierta en 1.x |
-| **Futuro** | YubiKey; Shamir 2-de-3; macOS; modo terminal en Windows |
+| **Futuro** | YubiKey; Shamir 2-de-3; macOS |
 
 ### 14.1 Estado (2026-10-29)
 
@@ -981,8 +1011,11 @@ Decidido con el usuario el 2026-11-10, implementado en la 1.3 (`term/` en
 **Alcance.** La app gráfica (Windows y Linux) es el producto completo y es
 donde llegan las funciones nuevas. El modo terminal es a propósito sencillo:
 abrir, editar, listar y borrar notas de la bóveda normal. No tiene ajustes,
-perfiles, accesos, exportar ni generador. Solo en Linux (en Windows haría
-falta un segundo ejecutable de consola). La terminal no recibe más funciones.
+perfiles, accesos ni generador. La 1.3.1 añadió, a pedido del usuario,
+elegir bóveda, *Save as* y exportar una nota a un archivo (§17.5) y
+comandos dentro de la lista (§17.2). Solo en Linux; la 1.4 lo lleva a
+Windows (allí hace falta un ejecutable de consola aparte, por decidir).
+Las funciones nuevas siguen llegando primero a la app.
 
 ### 17.1 Funcionamiento
 
@@ -991,16 +1024,34 @@ falta un segundo ejecutable de consola). La terminal no recibe más funciones.
   en la app gráfica. Una nota nueva se crea al guardar por primera vez; si
   se sale sin guardar, no se crea.
 - **Qué bóveda:** `--vault <ruta>`, si no `$HEIMDALL_VAULT`, si no la más
-  reciente de `recent.txt`, y si no hay ninguna, pregunta la ruta. Las
-  bóvedas Hardened y Paranoid no se anotan en recientes (§6.1), así que
-  usan una de las dos primeras.
+  reciente de las recordadas, y si no hay ninguna, pregunta la ruta (Tab
+  completa carpetas y archivos `.heim`). Las recordadas son `recent.txt`
+  de la app más `terminal-vaults.txt`, la lista propia de la terminal.
+- **Elegir bóveda (v1.3.1):** `heimdall` sin argumentos, con más de una
+  bóveda recordada, las lista antes de la contraseña
+  (`[1] personal  ~/Documents/personal.heim  opened 2026-11-12`) y pregunta
+  `:: Vault [1-3, Enter = personal, p = other path, q = quit] :`. Enter
+  abre la más reciente; `p` pide una ruta; `q` (o Esc, `^C`) sale sin
+  abrir nada. La lista se borra al elegir. Con una sola, o
+  con `--vault` / `$HEIMDALL_VAULT`, no pregunta. `heimdall <nota>`, `ls` y
+  `rm` usan siempre la más reciente.
+- **Recordar una Hardened o Paranoid (v1.3.1):** esos perfiles no se anotan
+  en recientes (§6.1). Al abrir una con `--vault` en `heimdall` (y tras la
+  contraseña correcta) pregunta `Remember it for the terminal? Its path
+  stays on this computer. [y/N]`, avisando que deja la ruta en el equipo.
+  Sí: se anota en `terminal-vaults.txt` (la ventana nunca la muestra) y
+  `heimdall forget <bóveda>` la quita. No: muestra cómo usar
+  `$HEIMDALL_VAULT` y **vuelve a preguntar la próxima vez** (decidido por
+  el usuario: recordar el "no" también dejaría una huella). Lo mismo para
+  una Basic con *Remember recent vaults* apagado.
 - **Ventana o terminal** (el mismo ejecutable): con un argumento (nota o
   comando) siempre es modo terminal. Sin argumentos, es modo terminal si
   stdin y stdout son una terminal, y ventana si no (menú de aplicaciones,
   gestor de archivos). `--gui` fuerza la ventana y es lo que usa
   `heimdall.desktop`. Desde la AppImage, sin argumentos siempre es la
   ventana (la gente la arranca desde una terminal).
-- Pide la contraseña de la bóveda como `sudo` (tres intentos, sin eco). Si
+- Pide la contraseña de la bóveda como `sudo` (hasta tres por comando, sin
+  eco), con el límite de contraseñas incorrectas de §9.1. Si
   la bóveda exige USB, espera a que se conecte y la vigila igual que la app
   (§8.3). No se abre con el código de recuperación: eso obliga a rehacer
   los accesos y es cosa de la app.
@@ -1023,7 +1074,12 @@ falta un segundo ejecutable de consola). La terminal no recibe más funciones.
   Si guardar falla, no se bloquea (no se pierde trabajo), salvo USB
   retirada, apagado o terminal cerrada. `^L` bloquea a mano.
 - **Terminal cerrada o `SIGTERM`:** guarda cifrado y sale (nano dejaría un
-  `.save` en claro; aquí no). Al apagar el equipo, igual que la app
+  `.save` en claro; aquí no). Hasta la 1.3.0, si la ventana de la terminal
+  se cerraba con el editor abierto, el proceso se quedaba girando al 100 %
+  sin guardar y dejaba la bóveda ocupada: el lector de eventos por defecto
+  de crossterm repite para siempre la lectura de una terminal cerrada. La
+  1.3.1 usa su otro lector (función `use-dev-tty`), que sí termina, y trata
+  cualquier error al leer o dibujar como terminal cerrada. Al apagar el equipo, igual que la app
   (inhibidor de logind mientras haya cambios).
 - **Nunca se escribe texto plano a disco**: ni archivos temporales ni swap
   (mlock de la llave, igual que la app, §13.1), y el editor usa la pantalla
@@ -1039,6 +1095,7 @@ falta un segundo ejecutable de consola). La terminal no recibe más funciones.
 | `heimdall <título>` | Abre o crea esa nota en el editor. Varias palabras sin comillas forman un solo título |
 | `heimdall ls [filtro]` | Solo los títulos, uno por línea en stdout, sin banner (sirve en scripts). El filtro compara con el título tal como se muestra, así que no sirve para sondear un secreto |
 | `heimdall rm <título>` | Manda la nota a la papelera, **siempre preguntando antes**: `:: Move "x" to trash? [y/N] :`. Por defecto No |
+| `heimdall forget <bóveda>` | Deja de recordar en la terminal una bóveda (por nombre o ruta) anotada con la pregunta de §17.1 (v1.3.1) |
 | `heimdall -- <título>` | Para una nota llamada `ls`, `rm` o que empiece con `-` |
 | `heimdall --help`, `--version` | Banner y ayuda; versión |
 
@@ -1051,6 +1108,22 @@ falta un segundo ejecutable de consola). La terminal no recibe más funciones.
   `:: No note is called "ideas". Create it? [y/N] :`. `n` pide un título y
   crea la nota; si el título ya existe recibe ` (2)` (§10.1).
 - `?` muestra una ayuda corta en la pantalla alterna (no ensucia la lista).
+- **Comandos en la lista (v1.3.1):** pedido por el usuario el 2026-11-12,
+  para no tener que salir y volver a escribir la contraseña. Empiezan con
+  `-`, así nunca chocan con un título:
+  - `-rm <número o título>`: a la papelera, **siempre preguntando**
+    (`Move "x" to trash? [y/N]`), igual que `heimdall rm`.
+  - `-mv <número o título>`: pide `New title for "x" :` y renombra (título
+    único, §10.1). Si el nuevo título es de un lenguaje, borra `code_off`
+    como `^O`.
+  - `-ls [filtro]`: la lista muestra solo los títulos que contienen el
+    filtro (comparado con el título tal como se ve) y avisa
+    `Showing 2 of 9 notes (filter "py")`; los números son los de la lista
+    filtrada. `-ls` solo vuelve a mostrarlas todas.
+  - `-lock` o `-q`: bloquea y sale (como Enter). `-help`: como `?`.
+  - Tab completa el título después de `-rm ` y `-mv `. Un `-x`
+    desconocido abre la nota que se llame exactamente así, si existe; si
+    no, `Unknown command -x. ? shows the commands.`
 - **Nombres únicos en las listas:** los títulos ya son únicos (§10.1); las
   notas sin título que comparten primera línea, o cuyos títulos solo
   difieren en un secreto oculto, se muestran como `texto` y `texto (2)`,
@@ -1067,6 +1140,8 @@ Opciones: `-v, --vault <ruta>`, `--gui`. Los avisos y las preguntas van a
 stderr y empiezan con `[heimdall]`; a stdout solo va lo pedido. Código de
 salida: 0 bien, 1 error o cancelado, 2 argumentos mal escritos.
 
+
+**`-n` y Enter = sí (v1.3.1, usuario 2026-11-12).** En la lista de notas, `-n test` crea la nota `test` y abre el editor **sin preguntar**; si ya hay una nota con ese título exacto la abre y lo avisa al volver (`There was already a note "test", so it was opened.`); `-n` solo pregunta el título como `n`. Las preguntas sí/no pasan a **`[Y/n]`: Enter es sí** (`Create it?`, `Move "x" to trash?` en `-rm` y `heimdall rm`, `Export? [Y/n]` de `^E`; `Save changes?` ya lo era). Se quedan en **`[y/N]`** dos, porque un Enter por costumbre ahí no tiene vuelta atrás o deja el rastro que el perfil evita: **reemplazar un archivo existente** al exportar, y **recordar una bóveda** Hardened/Paranoid.
 ### 17.3 Aspecto
 
 **Sin colores**, solo caracteres del teclado. La única excepción es el
@@ -1098,7 +1173,11 @@ modo código (§17.4).
     RePág/AvPág; `^S` guardar, `^Q` salir (con cambios pregunta
     `Save changes to "x"?` Y / N / Esc), `^F` buscar (Enter siguiente,
     `^P` anterior, Esc), `^Z` / `^Y` deshacer y rehacer, `^K` cortar línea,
-    `^U` pegar, `^T` modo código, `^L` bloquear, `^G` ayuda.
+    `^U` pegar, `^T` modo código, `^L` bloquear, `^G` ayuda; desde la 1.3.1,
+    `^O` guardar como y `^E` exportar (§17.5). **`^H` también borra hacia
+    atrás**: algunas terminales lo envían en lugar de DEL al pulsar
+    Retroceso, y hasta la 1.3.0 no hacía nada (reportado por el usuario el
+    2026-11-12; también en las preguntas y en *Find*).
   - Ajuste de línea por palabras (salvo en modo código). Tab inserta lo que diga el
     ajuste de la bóveda. Pegar desde la terminal pasa por el detector de
     secretos (§11.3) si está activo. Límite de 2 MB por nota, como la app.
@@ -1114,11 +1193,20 @@ https://claude.ai/artifact/FmLMhvb84AJ3EQpgJkxnvj
 - `^T` lo activa o desactiva **en la nota** (el mismo dato que usa la app,
   `Note.code`, §10.6): una nota en modo código en la app abre así en la
   terminal, y al revés. El cambio se guarda con `^S`.
-- **Nota nueva con nombre de archivo de código** (`respaldo.py`,
-  `index.html`, `main.c`…): empieza ya en modo código, con el lenguaje de
-  su extensión (`code::by_extension`). Markdown no: es prosa y queda como
-  nota normal. Solo al crear la nota; después manda lo guardado en ella,
-  así `^T` la puede apagar para siempre.
+- **Por extensión (v1.3.1, §10.6):** una nota, nueva o existente, cuyo
+  título tiene la extensión de un lenguaje (`respaldo.py`, `notas.md`)
+  abre en modo código, salvo que se haya apagado a mano, y lo avisa una vez
+  abajo: `[ Code mode: Markdown, from .md. ^T turns it off ]`. Apagarlo
+  con `^T` se guarda en la nota (`code_off`). En la 1.3 solo valía para
+  notas nuevas y sin Markdown.
+- **Sugerir la extensión (v1.3.1, §10.6):** si el título propio no tiene
+  extensión y el lenguaje se sabe (el elegido, o el que sale del texto:
+  `#!`, `<html>` o las pistas de `code::guess_from_text`), la barra de
+  abajo lo sugiere: `[ Looks like Python. ^O to save as tets.py ]`. Al
+  abrir y con `^T`, solo en modo código; **al guardar con `^S`, también
+  fuera del modo código** (`[ Saved. Looks like Python. ^O to save as
+  tets.py ]`), una vez por nombre mientras el editor está abierto. `^O`
+  viene escrito con ese nombre. Nunca enciende el modo código sola.
 - **Lenguaje:** el guardado en la nota o, si no hay, el detectado como en
   la app (extensión del título o línea `#!`). Se ve arriba a la derecha:
   `Code: Python`.
@@ -1142,3 +1230,32 @@ https://claude.ai/artifact/FmLMhvb84AJ3EQpgJkxnvj
   captura.
 - La barra de atajos cambia `^R Reveal` por `^T Code` (`^R` sigue
   funcionando).
+
+### 17.5 Guardar como y exportar (v1.3.1)
+
+Pedido por el usuario el 2026-11-12. Mockups:
+https://claude.ai/artifact/E7b4FUvTdGZ2Uh9uv6LGo9
+
+- **`^O` Save as** (como *Write Out* de nano): pide el título en la barra
+  de abajo, ya escrito con el actual (o con la extensión sugerida, §17.4).
+  **Renombra la nota dentro de la bóveda** y guarda: sigue cifrada y la
+  ventana la ve con el nombre nuevo. Un título ocupado recibe ` (2)`
+  (§10.1). Si el nuevo título es de un lenguaje, enciende el modo código.
+- **`^E` Export**: escribe la nota en un **archivo normal, sin cifrar**,
+  para ejecutarla o compilarla fuera de Heimdall. Hasta tres pasos en la
+  barra de abajo:
+  1. `Export to:` con el nombre de archivo de la nota (`plain::file_name_for`)
+     en la carpeta donde se abrió la terminal; Tab completa rutas.
+  2. Solo si la nota tiene secretos: `H [secret]`, `K {*...*}` o
+     `R Real values` (lo mismo que la exportación de la app, §10.9).
+  3. `~/x.py will NOT be encrypted. Export?` (o `exists. Replace it…?`).
+     Solo `y` exporta; cualquier otra tecla cancela.
+  Se escribe de forma atómica, con saltos de línea LF.
+- **Por perfil:** permitido en Basic y Hardened. En **Paranoid empieza
+  apagado**; se enciende en *Settings → Vault → Export from the terminal*,
+  que pide la contraseña (decidido por el usuario). Apagado, `^E` dice
+  `[ Export is off for this vault. Turn it on in Settings > Vault ]`.
+  Ajuste `SecuritySettings::terminal_export` (contenido versión 6).
+- Esto rompe a propósito la regla "nunca texto plano a disco" de §17.1,
+  solo cuando el usuario lo pide y lo confirma, igual que la exportación
+  de la app.

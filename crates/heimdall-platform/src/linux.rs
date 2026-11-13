@@ -26,6 +26,19 @@ pub fn init() {
     }
 }
 
+pub fn boot_clock_ms() -> u64 {
+    let mut ts = libc::timespec {
+        tv_sec: 0,
+        tv_nsec: 0,
+    };
+    // SAFETY: writes one timespec the caller owns. CLOCK_BOOTTIME counts
+    // from boot, suspend included, and can't be set.
+    if unsafe { libc::clock_gettime(libc::CLOCK_BOOTTIME, &mut ts) } != 0 {
+        return 0;
+    }
+    (ts.tv_sec as u64) * 1000 + (ts.tv_nsec as u64) / 1_000_000
+}
+
 pub fn lock_memory(address: usize, len: usize) -> bool {
     // SAFETY: mlock only pins the pages of the range; an invalid range
     // makes it fail, it doesn't touch the memory.
