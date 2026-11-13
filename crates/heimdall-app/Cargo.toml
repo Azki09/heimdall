@@ -21,7 +21,7 @@ eframe = { version = "0.31", default-features = false, features = ["default_font
 # What eframe's default features turned on in winit (Wayland loaded at run
 # time, not linked).
 winit = "0.30"
-rfd = "0.15"
+rfd = "0.18"
 arboard = { version = "3", default-features = false }
 zxcvbn = "2"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
