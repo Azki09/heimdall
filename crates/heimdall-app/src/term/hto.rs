@@ -412,7 +412,8 @@ impl Scene {
 
 /// The first frame for a `cols` x `rows` terminal, or `None` when it
 /// doesn't fit.
-pub fn compose(cols: usize, rows: usize, seed: u64) -> Option<Vec<Row>> {
+#[cfg(test)]
+fn compose(cols: usize, rows: usize, seed: u64) -> Option<Vec<Row>> {
     Scene::new(cols, rows, seed).map(|s| s.frame())
 }
 

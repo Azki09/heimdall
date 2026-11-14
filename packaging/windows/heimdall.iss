@@ -114,25 +114,24 @@ function PathWithout(Paths, Dir: String): String;
 var
   Item: String;
   P: Integer;
+  First: Boolean;
 begin
+  { Everything else stays as it was, empty entries and a final ';'
+    included, so uninstalling gives back the exact same PATH. }
   Result := '';
+  First := True;
+  Paths := Paths + ';';
   while Paths <> '' do
   begin
     P := Pos(';', Paths);
-    if P = 0 then
+    Item := Copy(Paths, 1, P - 1);
+    Delete(Paths, 1, P);
+    if (Item = '') or not SamePath(Item, Dir) then
     begin
-      Item := Paths;
-      Paths := '';
-    end else
-    begin
-      Item := Copy(Paths, 1, P - 1);
-      Delete(Paths, 1, P);
-    end;
-    if (Trim(Item) <> '') and not SamePath(Item, Dir) then
-    begin
-      if Result <> '' then
+      if not First then
         Result := Result + ';';
       Result := Result + Item;
+      First := False;
     end;
   end;
 end;
@@ -147,9 +146,12 @@ begin
   Updated := PathWithout(Paths, Dir);
   if Add then
   begin
-    if Updated <> '' then
-      Updated := Updated + ';';
-    Updated := Updated + Dir;
+    if Updated = '' then
+      Updated := Dir
+    else if Updated[Length(Updated)] = ';' then
+      Updated := Updated + Dir + ';'
+    else
+      Updated := Updated + ';' + Dir;
   end;
   if Updated <> Paths then
   begin
