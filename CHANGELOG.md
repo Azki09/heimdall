@@ -4,6 +4,127 @@ All notable changes to Heimdall. Versions follow
 [Semantic Versioning](https://semver.org). Vaults created by any 1.x version
 keep opening in every later version (`docs/DESIGN.md` section 5.6).
 
+## [1.4.0] - 2026-11-14
+
+### Which file do I download?
+
+| Your system | File | Shows up in the Start / app menu |
+|---|---|---|
+| Windows 10 / 11 (64-bit) | `heimdall-1.4.0-setup.exe` | Yes, and `heimdall` works in any terminal |
+| Windows, portable (USB drive, no install) | `heimdall-1.4.0-windows-x86_64.zip` | No, run `heimdall.exe` |
+| Ubuntu, Debian, Mint (22.04 / 12 or newer) | `heimdall_1.4.0_amd64.deb` | Yes |
+| Any other Linux x86_64 (Fedora 36+, Arch, ...) | `heimdall-1.4.0-linux-x86_64.tar.gz` + `install.sh` | Yes |
+| Linux, portable (USB drive, no install) | `Heimdall-1.4.0-x86_64.AppImage` | No, run the file |
+
+`SHA256SUMS.txt` holds the hash of every file, to check your download.
+
+Vaults are the same as in 1.3.1 and 1.3.2: they all open each other's vaults.
+
+Heimdall never connects to the internet, so it never updates itself: to
+update, download the new version and install it the same way. Your vaults
+and settings stay as they are.
+
+### Install on Windows
+In PowerShell: download and verify the installer, then run it:
+
+```powershell
+cd $HOME\Downloads
+$base = "https://github.com/Azki09/heimdall/releases/download/v1.4.0"
+$file = "heimdall-1.4.0-setup.exe"
+Invoke-WebRequest "$base/$file" -OutFile $file
+Invoke-WebRequest "$base/SHA256SUMS.txt" -OutFile SHA256SUMS.txt
+$expected = (Select-String ([regex]::Escape($file)) SHA256SUMS.txt).Line.Split(' ')[0]
+if ((Get-FileHash $file).Hash -eq $expected) { "OK" } else { "MISMATCH: do not run it" }
+gh attestation verify $file -R Azki09/heimdall   # optional, needs the GitHub CLI
+.\heimdall-1.4.0-setup.exe
+```
+
+It installs only for you, without administrator rights. Running it over
+an older Heimdall updates it in the same folder with the same options.
+Remove: Settings → Apps → Heimdall → Uninstall. For the zip, use the same
+steps with `heimdall-1.4.0-windows-x86_64.zip` and unzip it anywhere.
+
+The files are not signed yet, so the first time Windows SmartScreen may
+show "Windows protected your PC". If the hash matched, choose
+**More info → Run anyway**.
+
+### Install on Linux
+First download the hash list:
+
+```sh
+cd ~/Downloads
+base=https://github.com/Azki09/heimdall/releases/download/v1.4.0
+curl -LO "$base/SHA256SUMS.txt"
+```
+
+**Ubuntu, Debian, Mint (.deb)**, for every user of the computer:
+
+```sh
+curl -LO "$base/heimdall_1.4.0_amd64.deb"
+sha256sum -c --ignore-missing SHA256SUMS.txt   # must say OK
+gh attestation verify heimdall_1.4.0_amd64.deb -R Azki09/heimdall   # optional
+sudo apt install ./heimdall_1.4.0_amd64.deb
+```
+
+Open it from the app menu, or with `heimdall --gui` from a terminal
+(plain `heimdall` in a terminal is the terminal mode). Remove: `sudo apt remove heimdall`.
+
+**Any distribution (.tar.gz + install.sh)**, only for you, without sudo:
+
+```sh
+curl -LO "$base/heimdall-1.4.0-linux-x86_64.tar.gz"
+sha256sum -c --ignore-missing SHA256SUMS.txt   # must say OK
+gh attestation verify heimdall-1.4.0-linux-x86_64.tar.gz -R Azki09/heimdall   # optional
+tar xzf heimdall-1.4.0-linux-x86_64.tar.gz
+./heimdall-1.4.0-linux-x86_64/install.sh
+```
+
+If it doesn't appear in the menu right away, log out and back in. Remove:
+`~/.local/share/heimdall/uninstall.sh`.
+
+**Portable (AppImage)**, nothing installed, not in the menu:
+
+```sh
+curl -LO "$base/Heimdall-1.4.0-x86_64.AppImage"
+sha256sum -c --ignore-missing SHA256SUMS.txt   # must say OK
+chmod +x Heimdall-1.4.0-x86_64.AppImage
+./Heimdall-1.4.0-x86_64.AppImage
+```
+
+AppImages need FUSE 2 (`sudo apt install libfuse2` on Ubuntu 22.04,
+`libfuse2t64` on 24.04).
+
+Removing Heimdall never deletes your vaults (`.heim` files).
+
+
+### Added
+- **Terminal mode on Windows.** Type `heimdall` in PowerShell or cmd to
+  list, open, edit and search your notes without a window, exactly as on
+  Linux: the editor, the commands in the list, Save as, Export, code mode,
+  the vault picker and the wrong-password limit. Closing the console
+  window saves the note, encrypted; Win+L, sleep and shutdown lock the
+  vault as in the app. It works in Windows Terminal and in the classic
+  console. It is `heimdall.com`, next to `heimdall.exe`; a double-click on
+  it opens the window.
+- **Windows installer.** Installs only for you (no administrator rights),
+  adds Heimdall to the Start menu and, if you want, to the desktop and to
+  your PATH. It updates an older Heimdall in place, asks before reinstalling
+  the same version or going back to an older one, and asks you to close
+  Heimdall instead of closing it. Uninstalling never touches your vaults or
+  settings.
+- **Windows zip.** `heimdall.exe` and `heimdall.com` in one folder, for a
+  USB drive or a computer where you'd rather not install anything. It
+  replaces the single `heimdall.exe` download.
+- The tips about the terminal mode now also show on Windows.
+
+### Changed
+- **The list of notes in the terminal** is drawn again from the top each
+  time, so the logo no longer scrolls out of sight after opening a note.
+  When the logo and the list don't fit in the window, it shows the
+  one-line banner instead.
+- Exporting a `.bat` or `.cmd` note from the terminal writes Windows line
+  breaks (CRLF), which cmd needs. Everything else still gets LF.
+
 ## [1.3.2] - 2026-11-13
 
 ### Which file do I download?
@@ -696,6 +817,7 @@ First stable release.
 - Releases built by GitHub Actions with a statically linked C runtime,
   published with SHA-256 checksums and a build provenance attestation.
 
+[1.4.0]: https://github.com/Azki09/heimdall/releases/tag/v1.4.0
 [1.3.2]: https://github.com/Azki09/heimdall/releases/tag/v1.3.2
 [1.3.1]: https://github.com/Azki09/heimdall/releases/tag/v1.3.1
 [1.3.0]: https://github.com/Azki09/heimdall/releases/tag/v1.3.0

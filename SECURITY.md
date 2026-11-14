@@ -80,21 +80,21 @@ Heimdall does **not** protect against:
 
 ## Verifying a release
 
-Every release on GitHub includes `heimdall.exe` (Windows), an AppImage, a
-`.deb` and a `.tar.gz` (Linux), a `SHA256SUMS.txt` file and a build provenance
+Every release on GitHub includes an installer and a zip (Windows), an
+AppImage, a `.deb` and a `.tar.gz` (Linux), a `SHA256SUMS.txt` file and a build provenance
 attestation that ties each file to the exact commit and workflow run that
 produced it.
 
 Check the hash in PowerShell and compare it with `SHA256SUMS.txt`:
 
 ```powershell
-Get-FileHash .\heimdall.exe -Algorithm SHA256
+Get-FileHash .\heimdall-<version>-setup.exe -Algorithm SHA256   # or the .zip
 ```
 
 Check the attestation with the GitHub CLI:
 
 ```powershell
-gh attestation verify .\heimdall.exe -R Azki09/heimdall
+gh attestation verify .\heimdall-<version>-setup.exe -R Azki09/heimdall
 ```
 
 On Linux, the same two checks:

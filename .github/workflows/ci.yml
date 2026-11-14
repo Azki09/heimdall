@@ -37,8 +37,15 @@ jobs:
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
       - name: Tests
         run: cargo test --workspace --locked
+      # heimdall.com, the terminal mode on Windows (DESIGN §17.6).
+      - name: Clippy (console build)
+        run: cargo clippy -p heimdall-app --all-targets --locked --features console -- -D warnings
+      - name: Tests (console build)
+        run: cargo test -p heimdall-app --locked --features console
       - name: Release build
-        run: cargo build --release --locked -p heimdall-app
+        run: |
+          cargo build --release --locked -p heimdall-app
+          cargo build --release --locked -p heimdall-app --features console --target-dir target/console
 
   check-linux:
     name: Lint and test (Linux)

@@ -2545,9 +2545,9 @@ fn editor_tips(ctx: &egui::Context, s: &Session, st: &mut EditorState) {
     if let Some(r) = st.plus_rect {
         tips::show(ctx, Tip::FirstNote, r, Side::Below);
     }
-    // The terminal mode is Linux only for now (DESIGN §17); from the
-    // second time a vault opens, so it doesn't pile up with the first.
-    if cfg!(target_os = "linux") && tips::seen_before(Tip::FirstNote) && !tips::seen(Tip::TerminalHint) {
+    // Where the terminal mode exists (DESIGN §17); from the second time a
+    // vault opens, so it doesn't pile up with the first.
+    if tips::terminal_available() && tips::seen_before(Tip::FirstNote) && !tips::seen(Tip::TerminalHint) {
         if let (true, Some(r)) = (status_bar, st.status_left) {
             tips::show(ctx, Tip::Terminal, r, Side::Above);
         }

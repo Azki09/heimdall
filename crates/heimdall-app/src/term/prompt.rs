@@ -12,7 +12,7 @@ use std::io::{self, IsTerminal, Write};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
-use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
+use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use crossterm::terminal;
 use zeroize::Zeroizing;
 
@@ -28,6 +28,24 @@ pub enum Input {
     Cancelled,
     /// `watch` said the vault must lock.
     Locked(LockEvent),
+}
+
+/// Reads the next event, with keys as the rest of the code expects them.
+/// Windows reports AltGr as Ctrl+Alt: `@`, `\`, `{`, `}` on many layouts
+/// would look like Ctrl shortcuts and never be typed.
+pub fn read_event() -> io::Result<Event> {
+    Ok(match event::read()? {
+        Event::Key(key) => Event::Key(plain_key(key)),
+        other => other,
+    })
+}
+
+fn plain_key(mut key: KeyEvent) -> KeyEvent {
+    let altgr = KeyModifiers::CONTROL | KeyModifiers::ALT;
+    if cfg!(windows) && matches!(key.code, KeyCode::Char(_)) && key.modifiers.contains(altgr) {
+        key.modifiers.remove(altgr);
+    }
+    key
 }
 
 /// Titles that start with what was typed, for Tab.
@@ -125,7 +143,7 @@ pub fn read_line(
         if !ready {
             continue;
         }
-        let Ok(event) = event::read() else {
+        let Ok(event) = read_event() else {
             break Input::Locked(LockEvent::HungUp);
         };
         match event {
@@ -172,7 +190,7 @@ pub fn read_line(
                                             .iter()
                                             .map(|f| f.get(skip..).unwrap_or(f).to_owned())
                                             .collect()
-                                    } else if line.contains('/') {
+                                    } else if super::paths::looks_like_path(&line) {
                                         found
                                             .iter()
                                             .map(|f| super::paths::last_part(f).to_owned())
@@ -308,7 +326,7 @@ pub fn cancelled_within(for_: Duration) -> bool {
         if left.is_zero() || !event::poll(left).unwrap_or(false) {
             return false;
         }
-        if let Ok(Event::Key(key)) = event::read() {
+        if let Ok(Event::Key(key)) = read_event() {
             let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
             if key.code == KeyCode::Esc || (ctrl && matches!(key.code, KeyCode::Char('c' | 'd'))) {
                 return true;

@@ -1,5 +1,6 @@
 //! Terminal mode (DESIGN §17): open, edit, list and trash the notes of the
-//! normal vault from a terminal, like nano. Linux only. Deliberately small:
+//! normal vault from a terminal, like nano. Linux, and Windows through
+//! heimdall.com (§17.6). Deliberately small:
 //! settings, access, export and everything new live in the app.
 //!
 //! Everything outside the editor is ordinary terminal output; warnings and
@@ -10,18 +11,20 @@ pub mod hto;
 pub mod paths;
 pub mod text;
 
-#[cfg(target_os = "linux")]
+#[cfg(term_mode)]
 mod editor;
-#[cfg(target_os = "linux")]
+#[cfg(term_mode)]
 mod prompt;
-#[cfg(target_os = "linux")]
+#[cfg(term_mode)]
 mod session;
 
-#[cfg(target_os = "linux")]
-pub use linux::{hung_up, run, usage};
+#[cfg(all(term_mode, windows))]
+pub use imp::open_window;
+#[cfg(term_mode)]
+pub use imp::{hung_up, run, usage};
 
-#[cfg(target_os = "linux")]
-mod linux {
+#[cfg(term_mode)]
+mod imp {
     use std::io::IsTerminal;
     use std::path::PathBuf;
     use std::process::ExitCode;
@@ -51,16 +54,25 @@ mod linux {
 
     static HUNG_UP: OnceLock<Arc<AtomicBool>> = OnceLock::new();
 
-    /// The terminal window was closed (SIGHUP) or the process was asked to
-    /// end (SIGTERM): save, encrypted, and leave.
+    /// The terminal window was closed (SIGHUP, or the console's close
+    /// button on Windows) or the process was asked to end (SIGTERM): save,
+    /// encrypted, and leave.
     pub fn hung_up() -> bool {
         HUNG_UP.get().is_some_and(|f| f.load(Ordering::Relaxed))
     }
 
     pub fn run(cli: Cli) -> ExitCode {
-        let flag = HUNG_UP.get_or_init(|| Arc::new(AtomicBool::new(false)));
+        let flag: &'static Arc<AtomicBool> = HUNG_UP.get_or_init(|| Arc::new(AtomicBool::new(false)));
+        #[cfg(target_os = "linux")]
         for signal in [signal_hook::consts::SIGHUP, signal_hook::consts::SIGTERM] {
             let _ = signal_hook::flag::register(signal, flag.clone());
+        }
+        #[cfg(windows)]
+        {
+            heimdall_platform::on_console_close(flag);
+            // The editor and the questions draw with escape codes; Windows 10
+            // and 11 consoles understand them once asked to.
+            let _ = crossterm::ansi_support::supports_ansi();
         }
         // A panic must not leave the terminal in raw mode on the alternate screen.
         let default_hook = std::panic::take_hook();
@@ -95,6 +107,33 @@ mod linux {
         }
     }
 
+    /// heimdall.com: `--gui`, or a double-click. Starts heimdall.exe from
+    /// the same folder and returns at once.
+    #[cfg(windows)]
+    pub fn open_window() -> ExitCode {
+        use std::process::{Command as Process, Stdio};
+        let exe = std::env::current_exe()
+            .ok()
+            .and_then(|p| Some(p.parent()?.join("heimdall.exe")))
+            .filter(|p| p.is_file());
+        let Some(exe) = exe else {
+            eprintln!("[heimdall] heimdall.exe should be next to heimdall.com. Reinstall Heimdall.");
+            return ExitCode::FAILURE;
+        };
+        match Process::new(&exe)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+        {
+            Ok(_) => ExitCode::SUCCESS,
+            Err(e) => {
+                eprintln!("[heimdall] Couldn't open the window: {e}");
+                ExitCode::FAILURE
+            }
+        }
+    }
+
     pub fn usage(text: &str) -> ExitCode {
         eprintln!("[heimdall] {text} Try heimdall --help.");
         ExitCode::from(2)
@@ -111,7 +150,16 @@ mod linux {
     /// The start-screen logo (DESIGN §17.3). Only `heimdall` and
     /// `heimdall --help` print it.
     fn banner() {
-        if columns() < BANNER_COLS {
+        banner_sized(true);
+    }
+
+    /// Rows the logo block of [`banner`] takes; the short one takes 3.
+    const LOGO_ROWS: usize = 22;
+
+    /// The banner; with `logo` false, or a terminal under 80 columns, the
+    /// one-line version.
+    fn banner_sized(logo: bool) {
+        if !logo || columns() < BANNER_COLS {
             println!("HEIMDALL v{VERSION} :: encrypted notes");
         } else {
             println!();
@@ -121,6 +169,32 @@ mod linux {
         }
         println!("{}", rule());
         println!();
+    }
+
+    /// `:: Vault` and `:: Stored in`, under the banner.
+    fn vault_lines(path: &std::path::Path) {
+        println!(" :: Vault          : {}", session::vault_name(path));
+        println!(" :: Stored in      : {}", session::short_path(path));
+        println!("{}", rule());
+        println!();
+    }
+
+    /// The top of the list of notes, drawn again from the top of the window
+    /// each time (DESIGN §17.2): the logo when it fits above `below` rows,
+    /// else the one-line banner. Drawing the list under what was left would
+    /// push the logo out of a short window, out of sight.
+    fn draw_top(path: &std::path::Path, below: usize) {
+        let rows = crossterm::terminal::size().map_or(24, |(_, h)| usize::from(h));
+        let logo = rows >= LOGO_ROWS + 4 + below;
+        let _ = std::io::Write::flush(&mut std::io::stderr());
+        let _ = execute!(
+            std::io::stdout(),
+            MoveTo(0, 0),
+            crossterm::terminal::Clear(crossterm::terminal::ClearType::FromCursorDown)
+        );
+        prompt::forget_rows();
+        banner_sized(logo);
+        vault_lines(path);
     }
 
     const MENU_PROMPT: &str = " :: Open note [number or title, n = new, ? = help, Enter = quit] : ";
@@ -139,7 +213,7 @@ mod linux {
         println!();
         println!(" :: Options");
         println!("    -v, --vault <path>       Use this vault instead of the last one");
-        println!("                             (or set $HEIMDALL_VAULT)");
+        println!("                             (or set {})", session::ENV_VAR_SHOWN);
         println!("        --gui                Open the Heimdall window");
         println!("    -h, --help               Show this help");
         println!("    -V, --version            Show the version");
@@ -393,13 +467,16 @@ mod linux {
             }
             None => pick_vault()?,
         };
-        println!(" :: Vault          : {}", session::vault_name(&path));
-        println!(" :: Stored in      : {}", session::short_path(&path));
-        println!("{}", rule());
-        println!();
+        vault_lines(&path);
         let mut session = TermSession::unlock(path)?;
-        if source == Source::Option && !offer_to_remember(&mut session)? {
-            return Ok(());
+        // What the question about remembering the vault answered, shown
+        // above the first list.
+        let mut intro = Vec::new();
+        if source == Source::Option {
+            match offer_to_remember(&mut session)? {
+                Some(lines) => intro = lines,
+                None => return Ok(()),
+            }
         }
         // Something to tell above the question, the next time it is asked.
         let mut notice: Option<String> = None;
@@ -408,7 +485,6 @@ mod linux {
         // The one-time hint (DESIGN §10.11), under the first list.
         let mut hint = crate::tips::take_terminal_hint();
         loop {
-            prompt::erase_rows();
             let all = entries(&session);
             let wanted = filter.as_deref().map(str::to_lowercase);
             // Filtered as shown: a filter can't probe what a secret holds.
@@ -417,6 +493,18 @@ mod linux {
                 .filter(|e| wanted.as_ref().is_none_or(|f| e.label.to_lowercase().contains(f)))
                 .map(Entry::clone)
                 .collect();
+            // Rows under the top: the list, its blank line, the messages
+            // and the question.
+            let below = entries.len()
+                + 2
+                + intro.len()
+                + if filter.is_some() { 2 } else { 0 }
+                + if notice.is_some() { 2 } else { 0 }
+                + if hint { 3 } else { 0 };
+            draw_top(&session.path, below);
+            for line in std::mem::take(&mut intro) {
+                println!("{line}");
+            }
             for (i, entry) in entries.iter().enumerate() {
                 prompt::show(&list_line(i + 1, entry));
             }
@@ -740,11 +828,14 @@ mod linux {
     /// A vault opened with `--vault` whose profile keeps no recent list:
     /// may the terminal remember it? Asked every time until the answer is
     /// yes (DESIGN §17.1). False = the vault locked meanwhile.
-    fn offer_to_remember(session: &mut TermSession) -> Result<bool, Fail> {
+    /// Asks whether to remember a vault opened with `--vault` that the
+    /// computer doesn't keep. `None` = the vault locked meanwhile; else what
+    /// to show above the list.
+    fn offer_to_remember(session: &mut TermSession) -> Result<Option<Vec<String>>, Fail> {
         let security = &session.vault.content.security;
         let mut terminal = RecentVaults::terminal();
         if security.remember_recent || terminal.contains(&session.path) {
-            return Ok(true);
+            return Ok(Some(Vec::new()));
         }
         let name = session.name();
         let first = match security.profile {
@@ -757,24 +848,21 @@ mod linux {
         prompt::say("           so next time you need --vault again.");
         let label = " :: Remember it for the terminal? Its path stays on this computer. [y/N] : ";
         let Some(answer) = ask(session, label, &[])? else {
-            return Ok(false);
+            return Ok(None);
         };
         let short = session::short_path(&session.path);
+        let mut lines = Vec::new();
         if matches!(answer.to_lowercase().as_str(), "y" | "yes") {
             terminal.touch(&session.path);
-            prompt::say(&format!(
+            lines.push(format!(
                 "[heimdall] Remembered for the terminal. heimdall forget {name} removes it."
             ));
         } else {
-            prompt::say("[heimdall] Not remembered. To skip --vault without leaving it in Heimdall,");
-            prompt::say(&format!(
-                "           add to ~/.bashrc:  export HEIMDALL_VAULT={short}"
-            ));
+            lines.push("[heimdall] Not remembered. To skip --vault without leaving it in Heimdall,".into());
+            lines.extend(session::env_var_how_to(&short));
         }
-        prompt::say("");
-        // The answer stays on screen above the list.
-        prompt::forget_rows();
-        Ok(true)
+        lines.push(String::new());
+        Ok(Some(lines))
     }
 
     /// `heimdall forget <vault>`: by name (`trabajo`) or path.

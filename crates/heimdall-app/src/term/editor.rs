@@ -163,6 +163,29 @@ impl Drop for Screen {
     }
 }
 
+/// Whether the terminal shows 24-bit color, and whether its font has
+/// braille (the minimap). Linux terminals that have 24-bit color say so in
+/// `COLORTERM`. Windows consoles have it once escape codes are on (they
+/// are, `term::run`) but don't say so; the old console (conhost) may use a
+/// font without braille, like Consolas (DESIGN §17.6).
+pub(crate) fn terminal_traits() -> (bool, bool) {
+    #[cfg(windows)]
+    {
+        let braille = std::env::var_os("WT_SESSION").is_some()
+            || heimdall_platform::console_font().is_some_and(|font| {
+                let font = font.to_lowercase();
+                !["consolas", "lucida console", "courier new", "terminal", ""].contains(&font.as_str())
+            });
+        (true, braille)
+    }
+    #[cfg(not(windows))]
+    {
+        let truecolor =
+            std::env::var("COLORTERM").is_ok_and(|v| v.contains("truecolor") || v.contains("24bit"));
+        (truecolor, true)
+    }
+}
+
 /// The start of a note, enough to guess its language from.
 fn head(text: &str) -> &str {
     let mut end = text.len().min(8 * 1024);
@@ -172,19 +195,109 @@ fn head(text: &str) -> &str {
     &text[..end]
 }
 
+#[cfg(windows)]
+thread_local! {
+    /// Keys read while looking for a paste that turned out not to be one.
+    static PENDING: std::cell::RefCell<std::collections::VecDeque<Event>> = Default::default();
+}
+
+/// Like `event::poll`, counting the keys put back by [`pasted_burst`].
+fn poll(timeout: Duration) -> io::Result<bool> {
+    #[cfg(windows)]
+    if PENDING.with(|p| !p.borrow().is_empty()) {
+        return Ok(true);
+    }
+    event::poll(timeout)
+}
+
+/// The next event; in the text (`paste_ok`), a burst of keys on Windows
+/// becomes a paste.
+fn next_event(paste_ok: bool) -> io::Result<Event> {
+    #[cfg(windows)]
+    if let Some(event) = PENDING.with(|p| p.borrow_mut().pop_front()) {
+        return Ok(event);
+    }
+    let event = prompt::read_event()?;
+    Ok(if paste_ok { pasted_burst(event) } else { event })
+}
+
+/// Windows consoles hand a paste over as one key press per character, not
+/// as a paste (no bracketed paste there): many characters already waiting
+/// at once are a paste, so the secret detector (DESIGN §11.3) sees it whole.
+/// A person typing never gets this many keys ahead of the editor.
+#[cfg(windows)]
+fn pasted_burst(first: Event) -> Event {
+    const BURST: usize = 8;
+    // Some(Some(c)): a character; Some(None): a key release, skipped.
+    let typed = |e: &Event| match e {
+        Event::Key(k) if k.kind != KeyEventKind::Release => {
+            let ctrl = k.modifiers.intersects(KeyModifiers::CONTROL | KeyModifiers::ALT);
+            match k.code {
+                KeyCode::Char(c) if !ctrl => Some(Some(c)),
+                KeyCode::Enter if !ctrl => Some(Some('\n')),
+                KeyCode::Tab if !ctrl => Some(Some('\t')),
+                _ => None,
+            }
+        }
+        Event::Key(_) => Some(None),
+        _ => None,
+    };
+    let Some(Some(c)) = typed(&first) else {
+        return first;
+    };
+    let mut text = Zeroizing::new(String::new());
+    text.push(c);
+    let mut rest = None;
+    while event::poll(Duration::ZERO).unwrap_or(false) {
+        let Ok(next) = prompt::read_event() else { break };
+        match typed(&next) {
+            Some(Some(c)) => text.push(c),
+            Some(None) => {}
+            None => {
+                rest = Some(next);
+                break;
+            }
+        }
+    }
+    let event = if text.chars().count() >= BURST {
+        Event::Paste(std::mem::take(&mut *text))
+    } else {
+        // Not a paste: the keys one by one, as they came.
+        let mut keys = text.chars().map(|c| {
+            let code = match c {
+                '\n' => KeyCode::Enter,
+                '\t' => KeyCode::Tab,
+                c => KeyCode::Char(c),
+            };
+            Event::Key(KeyEvent::new(code, KeyModifiers::NONE))
+        });
+        let first = keys.next().unwrap_or(first);
+        PENDING.with(|p| p.borrow_mut().extend(keys));
+        first
+    };
+    if let Some(rest) = rest {
+        PENDING.with(|p| p.borrow_mut().push_back(rest));
+    }
+    event
+}
+
+#[cfg(not(windows))]
+fn pasted_burst(first: Event) -> Event {
+    first
+}
+
 /// Back to the normal screen. Also called from the panic hook.
 pub fn restore_terminal() {
     let mut out = io::stdout();
     // Wipe the alternate screen before leaving it: some terminals keep it.
-    let _ = execute!(
-        out,
-        SetAttribute(Attribute::Reset),
-        Clear(ClearType::All),
-        DisableMouseCapture,
-        DisableBracketedPaste,
-        LeaveAlternateScreen,
-        Show
-    );
+    let _ = execute!(out, SetAttribute(Attribute::Reset), Clear(ClearType::All));
+    // A step of its own: on Windows, turning the mouse off fails if this
+    // process never turned it on (a note that was never in code mode), and
+    // `execute!` stops at the first failure. Until 1.4 that skipped the
+    // rest, so the next screen was drawn on the alternate screen, with the
+    // cursor hidden and bracketed paste still on.
+    let _ = execute!(out, DisableMouseCapture);
+    let _ = execute!(out, DisableBracketedPaste, LeaveAlternateScreen, Show);
     let _ = terminal::disable_raw_mode();
 }
 
@@ -238,6 +351,8 @@ struct Editor<'a> {
     language: Option<&'static Language>,
     /// 24-bit color: the app's palette. Without it, bold and dim.
     truecolor: bool,
+    /// The font has braille, for the minimap.
+    braille: bool,
     geometry: Geometry,
     cache: Cache,
 }
@@ -279,7 +394,7 @@ pub fn edit(session: &mut TermSession, target: Target, title: String) -> io::Res
         TabInsert::Tab => "\t".to_owned(),
     };
     let mask_pasted = editor_settings.mask_pasted;
-    let truecolor = std::env::var("COLORTERM").is_ok_and(|v| v.contains("truecolor") || v.contains("24bit"));
+    let (truecolor, braille) = terminal_traits();
     let mut editor = Editor {
         session,
         target,
@@ -301,6 +416,7 @@ pub fn edit(session: &mut TermSession, target: Target, title: String) -> io::Res
         language_id: code_mode.map(|c| c.language).unwrap_or_default(),
         language: None,
         truecolor,
+        braille,
         geometry: Geometry::default(),
         cache: Cache::default(),
     };
@@ -333,13 +449,13 @@ impl Editor<'_> {
             screen.set_mouse(self.code)?;
             // A terminal that can't be drawn on or read from is gone:
             // save, encrypted, and leave, as when it is closed.
-            let ready = self.draw(screen).and_then(|()| event::poll(TICK));
+            let ready = self.draw(screen).and_then(|()| poll(TICK));
             match ready {
                 Ok(false) => continue,
                 Ok(true) => {}
                 Err(_) => return Ok(self.hang_up()),
             }
-            let Ok(event) = event::read() else {
+            let Ok(event) = next_event(matches!(self.mode, Mode::Edit)) else {
                 return Ok(self.hang_up());
             };
             match event {
@@ -596,7 +712,13 @@ impl Editor<'_> {
         let mut note = Note::new(0);
         note.title = self.title.clone();
         note.body = self.doc.text().to_owned();
-        let text = plain::note_text(&note, secrets, false);
+        // Windows' cmd misreads .bat and .cmd files with bare LF line
+        // breaks; everything else gets LF, as on Linux (DESIGN §17.6).
+        let crlf = path
+            .extension()
+            .and_then(|e| e.to_str())
+            .is_some_and(|e| e.eq_ignore_ascii_case("bat") || e.eq_ignore_ascii_case("cmd"));
+        let text = plain::note_text(&note, secrets, crlf);
         let shown = paths::short_path(path);
         match heimdall_core::storage::write_atomic(path, text.as_bytes()) {
             Ok(()) => self.say(format!("[ Exported, not encrypted: {shown} ]")),
@@ -946,7 +1068,14 @@ impl Editor<'_> {
         // room, the minimap on the right.
         let (gutter, panel) = if self.code {
             let digits = self.doc.rows().len().to_string().len().max(3);
-            (digits + 2, if w >= MAP_MIN_COLS { MAP_COLS + 1 } else { 0 })
+            (
+                digits + 2,
+                if w >= MAP_MIN_COLS && self.braille {
+                    MAP_COLS + 1
+                } else {
+                    0
+                },
+            )
         } else {
             (0, 0)
         };

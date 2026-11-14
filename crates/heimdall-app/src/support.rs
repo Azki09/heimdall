@@ -113,12 +113,12 @@ impl RecentVaults {
     /// Vaults the terminal remembers although their profile keeps no
     /// recent list, because the user said so (DESIGN §17.1). The app
     /// never shows them.
-    #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+    #[cfg_attr(not(term_mode), allow(dead_code))]
     pub fn terminal() -> Self {
         Self::load_from("terminal-vaults.txt")
     }
 
-    #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+    #[cfg_attr(not(term_mode), allow(dead_code))]
     pub fn contains(&self, path: &Path) -> bool {
         self.entries.iter().any(|e| e.path == path)
     }

@@ -6,6 +6,8 @@
 use std::path::PathBuf;
 
 #[cfg(windows)]
+mod console;
+#[cfg(windows)]
 mod harden;
 #[cfg(target_os = "linux")]
 mod linux;
@@ -112,6 +114,37 @@ pub fn watch_session(window: isize, wake: impl Fn() + Send + Sync + 'static) -> 
         let _ = (window, wake);
         false
     }
+}
+
+/// [`watch_session`] for the terminal mode, which has no window: on
+/// Windows a hidden one on a thread of its own.
+pub fn watch_session_console() -> bool {
+    #[cfg(windows)]
+    return console::watch_session();
+    #[cfg(target_os = "linux")]
+    return linux::watch_session(0, Box::new(|| {}));
+    #[cfg(not(any(windows, target_os = "linux")))]
+    false
+}
+
+/// Windows: sets `flag` when the console window is closed, and gives the
+/// program a few seconds to save and exit. Linux uses SIGHUP instead.
+#[cfg(windows)]
+pub fn on_console_close(flag: &'static std::sync::atomic::AtomicBool) -> bool {
+    console::on_close(flag)
+}
+
+/// Windows: no other program shares this console (a double-click on
+/// `heimdall.com`, not cmd or PowerShell).
+#[cfg(windows)]
+pub fn console_is_ours() -> bool {
+    console::console_is_ours()
+}
+
+/// Windows: the console's font, to know if it has braille.
+#[cfg(windows)]
+pub fn console_font() -> Option<String> {
+    console::font_name()
 }
 
 /// The last event since the previous call; ending wins over sleep, and

@@ -831,7 +831,7 @@ Si una señal de D-Bus no llega (un contenedor sin logind, un escritorio mínimo
 | **v1.0** | Formato congelado (§5.6), **menú contextual general** (clic derecho con Cut / Copy / Paste / Select all en cualquier parte del texto), copia de respaldo manual, exportar e importar, cifrado y en texto plano (§10.9) |
 | **v1.2** | Linux (§13.1) |
 | **v1.3** | Modo terminal sencillo, solo Linux (§17), y bloqueo exclusivo de la bóveda entre ventanas y terminal. La 1.3.1 trae lo que pidió el usuario tras probarla: elegir bóveda, límite de contraseñas incorrectas (§9.1), *Save as* y exportar, comandos en la lista y sugerir la extensión. La 1.3.2: versión bajo el logo y tips de una sola vez (§10.11) |
-| **v1.4** | Modo terminal en Windows: lo mismo que en Linux (diseño por decidir con el usuario; Windows necesita un ejecutable de consola aparte o adjuntar una consola) |
+| **v1.4** | Modo terminal en Windows con `heimdall.com`, igual que en Linux; instalador por usuario (Inno Setup) y zip portable en lugar del `.exe` suelto (§17.6) |
 | **v1.5** | Generador de contraseñas: inserta la contraseña directo como secreto `{*…*}`, sin pasar por el portapapeles |
 | **v2.0 — App completa** | Windows y Linux: menú lateral (el generador se muda ahí), etiquetas, notas fijadas, quizás historial de notas. Cambio de formato del contenido: decidir antes cómo se comporta una bóveda 2.0 abierta en 1.x |
 | **Futuro** | YubiKey; Shamir 2-de-3; macOS |
@@ -1024,8 +1024,8 @@ donde llegan las funciones nuevas. El modo terminal es a propósito sencillo:
 abrir, editar, listar y borrar notas de la bóveda normal. No tiene ajustes,
 perfiles, accesos ni generador. La 1.3.1 añadió, a pedido del usuario,
 elegir bóveda, *Save as* y exportar una nota a un archivo (§17.5) y
-comandos dentro de la lista (§17.2). Solo en Linux; la 1.4 lo lleva a
-Windows (allí hace falta un ejecutable de consola aparte, por decidir).
+comandos dentro de la lista (§17.2). En Linux desde la 1.3 y en
+Windows desde la 1.4, con un ejecutable de consola aparte (§17.6).
 Las funciones nuevas siguen llegando primero a la app.
 
 ### 17.1 Funcionamiento
@@ -1146,6 +1146,16 @@ Las funciones nuevas siguen llegando primero a la app.
   la lista se redibuja **en el mismo sitio** en vez de apilarse. El banner
   y las líneas `:: Vault` / `:: Stored in` se quedan. Implementación:
   `prompt.rs` cuenta las filas que escribe y las borra con `ESC[nA ESC[J`.
+- **La lista se dibuja desde arriba (v1.4):** con el logo (unas 26 filas
+  con la cabecera) y varias notas, en una ventana normal (30 filas en
+  Windows Terminal, 24 en muchas de Linux) el logo se iba hacia arriba y
+  dejaba de verse (reportado por el usuario el 2026-11-14). Ahora cada vez
+  que se muestra la lista se borra la pantalla visible y se dibuja todo:
+  banner, `:: Vault`, `:: Stored in` y la lista. El logo sale solo si cabe
+  con la lista y la pregunta; si no, la línea corta
+  `HEIMDALL v… :: encrypted notes`, como con menos de 80 columnas. La
+  respuesta a "Remember it for the terminal?" sale sobre la primera lista
+  (`draw_top` en `term/mod.rs`).
 
 Opciones: `-v, --vault <ruta>`, `--gui`. Los avisos y las preguntas van a
 stderr y empiezan con `[heimdall]`; a stdout solo va lo pedido. Código de
@@ -1194,7 +1204,7 @@ modo código (§17.4).
     secretos (§11.3) si está activo. Límite de 2 MB por nota, como la app.
 - **Implementación:** `crossterm` (modo crudo, teclas, pantalla alterna) y
   un editor propio pequeño (`term/text.rs`, sin terminal, con pruebas);
-  `signal-hook` para SIGHUP/SIGTERM. Ambas solo en Linux.
+  `signal-hook` para SIGHUP/SIGTERM en Linux. En Windows, §17.6.
 
 ### 17.4 Modo código en la terminal
 
@@ -1270,3 +1280,89 @@ https://claude.ai/artifact/E7b4FUvTdGZ2Uh9uv6LGo9
 - Esto rompe a propósito la regla "nunca texto plano a disco" de §17.1,
   solo cuando el usuario lo pide y lo confirma, igual que la exportación
   de la app.
+
+### 17.6 Windows (v1.4)
+
+Decidido con el usuario el 2026-11-14. Mockups:
+https://claude.ai/artifact/EXf3wU9taMRzV6AC3NA7mx (terminal) y
+https://claude.ai/artifact/TZj1jnAi7k59GYGvprSK9C (instalador).
+
+- **Dos ejecutables.** Windows fija al compilar si un programa es de
+  consola o de ventana. `heimdall.exe` es la ventana, como siempre (ignora
+  los argumentos). `heimdall.com` es el **mismo programa** compilado como
+  consola con la *feature* `console` de `heimdall-app`
+  (`cargo build --release --features console --target-dir target/console`,
+  renombrado a `.com`). Como `.COM` va antes que `.EXE` en `PATHEXT`,
+  escribir `heimdall` en cmd o PowerShell abre el `.com` (el truco de
+  `devenv.com`). Probado el 2026-11-14: Defender, SmartScreen y
+  Malwarebytes no se quejan. El enlazador quita la parte gráfica: pesa
+  ~1,3 MB. `build.rs` define el `cfg` `term_mode` (Linux, o Windows con
+  `console`), que activa `term/editor.rs`, `prompt.rs` y `session.rs`.
+- **`--gui` y doble clic:** el `.com` arranca `heimdall.exe` de su misma
+  carpeta y devuelve la consola al momento. Un doble clic en el `.com`
+  (la consola es solo suya, `GetConsoleProcessList`) también abre la
+  ventana en vez de cerrarse al instante.
+- **Cerrar la consola** con la ✕ (`SetConsoleCtrlHandler`,
+  `CTRL_CLOSE_EVENT`): marca la terminal como cerrada y retiene a Windows
+  hasta 4,5 s mientras el hilo principal guarda cifrado y sale, igual que
+  SIGHUP en Linux.
+- **Win+L, suspensión y apagado:** un programa de consola no recibe esos
+  mensajes, así que un hilo crea una **ventana invisible** (`STATIC`) y le
+  aplica el mismo `watch_session` de la app (§9), con su bucle de
+  mensajes (`heimdall_platform::watch_session_console`).
+- **AltGr:** Windows lo informa como Ctrl+Alt, y `@ \ { } [ ]` en muchos
+  teclados parecían atajos y no se escribían. `prompt::read_event` quita
+  Ctrl+Alt a los caracteres antes de que los vea nadie.
+- **Pegar:** crossterm en Windows no recibe el pegado como pegado (sin
+  *bracketed paste*), sino tecla por tecla. Si en el editor llegan **8 o
+  más caracteres de golpe** (ya esperando en la cola), se tratan como un
+  pegado, así el detector de secretos (§11.3) lo ve entero. Menos de 8 se
+  devuelven como teclas, en orden.
+- **Colores y minimapa:** con las secuencias de escape activadas
+  (`ansi_support`), la consola de Windows 10/11 muestra color de 24 bits,
+  también conhost (comprobado por el usuario), así que en Windows siempre
+  se usan los colores de la app. El minimapa usa braille: se muestra en
+  Windows Terminal (`WT_SESSION`) o si la fuente de la consola no es
+  Consolas, Lucida Console, Courier New o la raster
+  (`GetCurrentConsoleFontEx`).
+- **Rutas (decisión B):** se muestra la ruta completa (`C:\Users\…`), no
+  `~\`. Tab completa con `\` (o `/` si se escribió `/`), letras de unidad
+  (`D:` → `D:\`), `%VARIABLE%` y `~` al principio, sin distinguir
+  mayúsculas. Las rutas de red (`\\servidor\…`) no se completan.
+- **Exportar (decisión C):** LF como en Linux, salvo `.bat` y `.cmd`, que
+  van con CRLF porque cmd los lee mal con LF (en los dos sistemas).
+- **Variable de entorno:** la ayuda muestra `%HEIMDALL_VAULT%` y, al no
+  recordar una bóveda, sugiere `setx HEIMDALL_VAULT "<ruta>"`.
+- **Tips:** el de la ventana ("Heimdall also runs in the terminal") sale
+  en Windows solo si hay un `heimdall.com` junto al `.exe`
+  (`tips::terminal_available`); el de la lista, siempre.
+- **Instalador** (`packaging/windows/heimdall.iss`, Inno Setup 6.7.3,
+  descargado en CI con versión y hash fijos):
+  - Por usuario, sin administrador: `%LOCALAPPDATA%\Programs\Heimdall`.
+    Sin página de licencia (la GPL no pide aceptarla).
+    `WizardStyle=modern dynamic`: sigue el tema claro u oscuro de Windows.
+    Imágenes del asistente generadas del logo (`wizard-*.png`,
+    `small-*.png`).
+  - Opciones: PATH del usuario (marcada), menú Inicio (marcada), escritorio
+    (sin marcar). Desmarcar al reinstalar quita la entrada o el acceso.
+  - **Nunca cierra Heimdall** (`CloseApplications=no`): si hay un
+    `heimdall.exe` o `.com` corriendo desde la carpeta de instalación
+    (WMI), pide cerrarlo con Retry / Cancel; lo mismo al desinstalar.
+  - **Versión instalada** (registro `HKCU\…\Uninstall\{AppId}_is1`): más
+    vieja → se salta Bienvenida, Carpeta y Opciones y va al resumen; la
+    misma → "already installed. Reinstall?"; más nueva → avisa de
+    "unsupported content version", con Cancel por defecto. Las copias del
+    zip no se detectan ni se tocan.
+  - Bienvenida y Terminado dicen que **las actualizaciones son manuales**
+    (Heimdall nunca se conecta). Terminado invita a dejar comentarios con
+    un enlace al repositorio que solo se abre al hacer clic.
+  - Desinstalar quita programas, accesos y la entrada del PATH; nunca
+    bóvedas ni ajustes.
+  - `release.yml` lo compila, lo instala en silencio, prueba
+    `heimdall --version` desde el PATH, lo desinstala y comprueba que el
+    PATH quedó igual. El `AppId` no debe cambiar nunca.
+- **Release:** el `.exe` suelto se reemplaza por
+  `heimdall-<v>-setup.exe` y `heimdall-<v>-windows-x86_64.zip`
+  (`heimdall.exe`, `heimdall.com`, LICENSE, README), los dos con hash y
+  attestation. Sin firma en la 1.4 (decisión D); cuando SignPath apruebe,
+  firmar también el instalador.

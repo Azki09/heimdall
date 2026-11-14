@@ -24,37 +24,58 @@ in a `.txt` file.
 
 From the [latest release](https://github.com/Azki09/heimdall/releases/latest):
 
-- **Windows:** `heimdall.exe`
+- **Windows:** `heimdall-<version>-setup.exe` (installer) or
+  `heimdall-<version>-windows-x86_64.zip` (portable)
 - **Linux:** `heimdall_<version>_amd64.deb` (Debian, Ubuntu, Mint), the
   `.tar.gz` (any distribution) or the AppImage (see [Linux](#linux) below)
 
+Heimdall never connects to the internet, so it never checks for updates or
+updates itself. To update, download the new version and install it the same
+way; your vaults and settings stay as they are.
+
 ### Windows
 
-Get `heimdall.exe`.
-It is a single portable file: no installer, nothing else to download. Put it
-anywhere (a folder, or a USB drive) and run it. Windows 10 (version 2004 or
-later) or Windows 11, 64-bit.
+Windows 10 (version 2004 or later) or Windows 11, 64-bit. Two downloads;
+pick one:
+
+| You want | Download |
+|---|---|
+| Heimdall in the Start menu, and `heimdall` in any terminal | `heimdall-<version>-setup.exe` |
+| A folder you can carry on a USB drive, no install | `heimdall-<version>-windows-x86_64.zip` |
 
 **Verify it before running it.** In PowerShell, in the folder where you
-downloaded it:
+downloaded it, with `SHA256SUMS.txt` from the same release:
 
 ```powershell
-Get-FileHash .\heimdall.exe -Algorithm SHA256
+$file = "heimdall-1.4.0-setup.exe"   # or the .zip
+$expected = (Select-String ([regex]::Escape($file)) SHA256SUMS.txt).Line.Split(' ')[0]
+if ((Get-FileHash $file).Hash -eq $expected) { "OK" } else { "MISMATCH: do not run it" }
 ```
 
-The result must match `SHA256SUMS.txt` from the same release. With the
-[GitHub CLI](https://cli.github.com) you can also check that the file was
-built by this repository's workflow from the published source:
+With the [GitHub CLI](https://cli.github.com) you can also check that the
+file was built by this repository's workflow from the published source:
 
 ```powershell
-gh attestation verify .\heimdall.exe -R Azki09/heimdall
+gh attestation verify $file -R Azki09/heimdall
 ```
 
-The executable is not yet signed with a code-signing certificate, so the
-first time it runs Windows SmartScreen may show "Windows protected your
-PC". If the hash matches, choose **More info → Run anyway**. Signing is
-planned through the SignPath Foundation; see
-[Code signing policy](#code-signing-policy).
+**Installer.** Installs only for you, in
+`%LOCALAPPDATA%\Programs\Heimdall`, without administrator rights. It can put
+Heimdall in the Start menu, on the desktop, and on your PATH so that typing
+`heimdall` in PowerShell or cmd opens the [terminal mode](#terminal-mode)
+(open a new terminal after installing). To update, run the new version's
+installer: it keeps the folder and the options you chose. To remove it:
+**Settings → Apps → Heimdall → Uninstall**. Neither touches your vaults or
+settings.
+
+**Zip.** Unzip it anywhere (a folder, or a USB drive) and run
+`heimdall.exe`. `heimdall.com`, next to it, is the terminal mode: run
+`.\heimdall` from that folder, or add the folder to your PATH yourself.
+
+Neither file is signed with a code-signing certificate yet, so the first
+time Windows SmartScreen may show "Windows protected your PC". If the hash
+matches, choose **More info → Run anyway**. Signing is planned through the
+SignPath Foundation; see [Code signing policy](#code-signing-policy).
 
 ### Linux
 
@@ -72,7 +93,7 @@ them. Set `version` to the number of the
 [latest release](https://github.com/Azki09/heimdall/releases/latest):
 
 ```sh
-version=1.3.2
+version=1.4.0
 base=https://github.com/Azki09/heimdall/releases/download/v$version
 cd ~/Downloads
 curl -LO "$base/SHA256SUMS.txt"
@@ -89,7 +110,7 @@ sudo apt install "./heimdall_${version}_amd64.deb"
 ```
 
 Open it from the app menu ("Heimdall") or with `heimdall --gui` in a terminal
-(plain `heimdall` there is the [terminal mode](#terminal-mode-linux)). To
+(plain `heimdall` there is the [terminal mode](#terminal-mode)). To
 update, install the new `.deb` the same way. To remove it:
 `sudo apt remove heimdall`.
 
@@ -146,7 +167,7 @@ Linux:
 
 ## Getting started
 
-1. Run `heimdall.exe` and choose **Create vault**.
+1. Open Heimdall (from the Start menu, or `heimdall.exe`) and choose **Create vault**.
 2. Pick a security profile:
 
    | | Basic | Hardened | Paranoid |
@@ -202,9 +223,11 @@ Everything works without a mouse. The full list is in *Settings → Shortcuts*.
 | Next / previous control, press it | `Tab` / `Shift+Tab`, `Space` or `Enter` |
 | Close a menu or cancel a dialog | `Esc` |
 
-## Terminal mode (Linux)
+## Terminal mode
 
-The same `heimdall` also edits your notes without a window, like `nano`.
+`heimdall` in a terminal also edits your notes without a window, like
+`nano`: in any Linux terminal, and in PowerShell or cmd on Windows (the
+installer puts it on the PATH; from the zip, it is `heimdall.com`).
 It works on the notes of your normal vault, so anything you write there
 shows up in the app, and the other way round.
 
@@ -222,7 +245,7 @@ if the vault needs one. With several vaults remembered, `heimdall` lists
 them first (Enter opens the last one, `p` asks for another path, `q`
 quits); the other
 commands use the vault you opened last. `--vault <path>` or
-`$HEIMDALL_VAULT` choose one. Hardened and Paranoid vaults are not
+the `HEIMDALL_VAULT` environment variable choose one. Hardened and Paranoid vaults are not
 remembered; open one with `--vault` and the terminal offers to remember it
 (only for the terminal, until `heimdall forget`).
 
@@ -240,7 +263,8 @@ like code, saving it suggests one (`tets` → `tets.py`, with `^O`); it never
 turns code mode on by itself. In the list of notes, Tab completes the title
 you are typing, and `-n title`, `-rm 3`, `-mv 3`, `-ls filter` and `-lock` work on the
 notes without leaving the vault (`?` lists them). The vault locks by itself exactly as in the
-app (idle time, USB key removed, sleep), saving first. Nothing is ever
+app (idle time, USB key removed, sleep, Win+L), saving first; so does
+closing the terminal window. Nothing is ever
 written to disk unencrypted, and the note doesn't stay in the terminal's
 scrollback.
 
@@ -287,7 +311,10 @@ On Linux the executable is `target/release/heimdall`.
 
 ```powershell
 cargo build --release -p heimdall-app
-# The executable is target\release\heimdall.exe
+# The window is target\release\heimdall.exe. The terminal mode is the
+# same program built as a console program; rename it to heimdall.com and
+# put it next to heimdall.exe:
+cargo build --release -p heimdall-app --features console --target-dir target\console
 ```
 
 Official releases are built with the C runtime linked statically, so they

@@ -1,5 +1,12 @@
-// No console window in release builds.
-#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+// No console window in release builds of heimdall.exe. heimdall.com (the
+// "console" feature) is a console program: the terminal mode on Windows.
+#![cfg_attr(
+    all(not(debug_assertions), not(feature = "console")),
+    windows_subsystem = "windows"
+)]
+// heimdall.com never opens the window itself (it starts heimdall.exe), so
+// most of the app is unused there.
+#![cfg_attr(all(windows, feature = "console"), allow(dead_code, unused_imports))]
 
 mod app;
 mod attempts;
@@ -15,9 +22,10 @@ mod secrets;
 mod session;
 mod spell;
 mod support;
-// Terminal mode is Linux only (DESIGN §17); its text model and argument
-// parser build everywhere so their tests run on every platform.
-#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+// Terminal mode (DESIGN §17): Linux, and heimdall.com on Windows
+// (`term_mode`, set by build.rs). Its text model and argument parser build
+// everywhere so their tests run on every platform.
+#[cfg_attr(not(term_mode), allow(dead_code))]
 mod term;
 mod theme;
 mod tips;
@@ -40,6 +48,28 @@ fn main() -> std::process::ExitCode {
             term::cli::Parsed::Usage(text) => return term::usage(&text),
         }
     }
+    window()
+}
+
+/// heimdall.com: the terminal mode, but the window is heimdall.exe's job.
+#[cfg(all(windows, feature = "console"))]
+fn window() -> std::process::ExitCode {
+    use std::io::IsTerminal;
+    let args: Vec<_> = std::env::args_os().skip(1).collect();
+    // A double-click opens a console just for us: that means the window.
+    if args.is_empty() && heimdall_platform::console_is_ours() {
+        return term::open_window();
+    }
+    let terminal = std::io::stdin().is_terminal() && std::io::stdout().is_terminal();
+    match term::cli::parse(args, terminal, false) {
+        term::cli::Parsed::Gui => term::open_window(),
+        term::cli::Parsed::Run(cli) => term::run(cli),
+        term::cli::Parsed::Usage(text) => term::usage(&text),
+    }
+}
+
+#[cfg(not(all(windows, feature = "console")))]
+fn window() -> std::process::ExitCode {
     match gui() {
         Ok(()) => std::process::ExitCode::SUCCESS,
         Err(e) => {

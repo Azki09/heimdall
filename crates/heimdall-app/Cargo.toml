@@ -11,6 +11,11 @@ publish = false
 name = "heimdall"
 path = "src/main.rs"
 
+[features]
+# The console build of the same program: heimdall.com on Windows, the
+# terminal mode (DESIGN §17.6). heimdall.exe is built without it.
+console = []
+
 [dependencies]
 heimdall-core = { path = "../heimdall-core" }
 heimdall-platform = { path = "../heimdall-platform" }
@@ -44,6 +49,10 @@ arboard = { version = "3", default-features = false, features = ["wayland-data-c
 # goes away; the default one spins forever on a closed terminal.
 crossterm = { version = "0.29", default-features = false, features = ["bracketed-paste", "events", "use-dev-tty"] }
 signal-hook = { version = "0.3", default-features = false }
+
+# The terminal mode in heimdall.com (feature "console").
+[target.'cfg(windows)'.dependencies]
+crossterm = { version = "0.29", default-features = false, features = ["bracketed-paste", "events", "windows"] }
 
 [lints]
 workspace = true

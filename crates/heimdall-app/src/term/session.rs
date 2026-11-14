@@ -94,6 +94,26 @@ pub enum Source {
     Asked,
 }
 
+/// How the help writes the environment variable.
+#[cfg(not(windows))]
+pub const ENV_VAR_SHOWN: &str = "$HEIMDALL_VAULT";
+#[cfg(windows)]
+pub const ENV_VAR_SHOWN: &str = "%HEIMDALL_VAULT%";
+
+/// How to set `HEIMDALL_VAULT` for good, so `--vault` isn't needed.
+pub fn env_var_how_to(path: &str) -> Vec<String> {
+    if cfg!(windows) {
+        vec![
+            format!("           run once:  setx HEIMDALL_VAULT \"{path}\""),
+            "           (then open a new terminal)".to_owned(),
+        ]
+    } else {
+        vec![format!(
+            "           add to ~/.bashrc:  export HEIMDALL_VAULT={path}"
+        )]
+    }
+}
+
 /// `--vault`, else `$HEIMDALL_VAULT`.
 pub fn given(arg: Option<PathBuf>) -> Option<(PathBuf, Source)> {
     match arg {
@@ -130,7 +150,7 @@ pub fn locate(arg: Option<PathBuf>) -> Result<(PathBuf, Source), Fail> {
         return Ok((entry.path, Source::Remembered));
     }
     eprintln!(
-        "[heimdall] No vault opened recently. Which one? (--vault <path> or $HEIMDALL_VAULT skip this)"
+        "[heimdall] No vault opened recently. Which one? (--vault <path> or {ENV_VAR_SHOWN} skip this)"
     );
     ask_path()
 }
@@ -250,7 +270,7 @@ impl TermSession {
             .as_ref()
             .filter(|_| vault.requires_keyfile())
             .map(|k| Presence::start(k, || {}));
-        heimdall_platform::watch_session(0, || {});
+        heimdall_platform::watch_session_console();
         let mut session = Self {
             vault,
             path,

@@ -32,9 +32,10 @@ pub enum Tip {
     Export,
     /// The lock screen after the vault locked by itself.
     Locked,
-    /// Linux: the window says the terminal mode exists.
+    /// The window says the terminal mode exists (Linux, and Windows when
+    /// heimdall.com is installed).
     Terminal,
-    /// Linux: the terminal's own one-line hint.
+    /// The terminal's own one-line hint.
     TerminalHint,
 }
 
@@ -242,8 +243,22 @@ pub fn close(tip: Tip) {
     });
 }
 
+/// Whether `heimdall` works in a terminal here: always on Linux; on
+/// Windows only if heimdall.com sits next to heimdall.exe (the installer
+/// and the zip put it there, DESIGN §17.6).
+pub fn terminal_available() -> bool {
+    if cfg!(target_os = "linux") {
+        return true;
+    }
+    cfg!(windows)
+        && std::env::current_exe()
+            .ok()
+            .and_then(|p| Some(p.parent()?.join("heimdall.com")))
+            .is_some_and(|p| p.is_file())
+}
+
 /// The terminal's hint, once: `true` the one time it should print.
-#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+#[cfg_attr(not(term_mode), allow(dead_code))]
 pub fn take_terminal_hint() -> bool {
     with(|s| {
         let key = Tip::TerminalHint.key();

@@ -1,5 +1,5 @@
 # Pushing a tag like v1.3.0 builds Heimdall on GitHub's runners for Windows
-# (heimdall.exe) and Linux (an AppImage, a .deb and a .tar.gz), and publishes them
+# (an installer, and a zip with heimdall.exe and heimdall.com) and Linux (an AppImage, a .deb and a .tar.gz), and publishes them
 # with their SHA-256 and a build provenance attestation that ties each file
 # to this commit and this workflow run.
 # Users verify with Get-FileHash / sha256sum and `gh attestation verify`
@@ -25,26 +25,38 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - name: Tests
         run: cargo test --workspace --locked
+      - name: Console build tests
+        run: cargo test -p heimdall-app --locked --features console
       - name: Release build
         # Static C runtime: runs on a clean Windows without VCRUNTIME140.dll.
+        # heimdall.exe is the window; heimdall.com, the same program built as
+        # a console program, is the terminal mode (DESIGN §17.6).
         env:
           RUSTFLAGS: -C target-feature=+crt-static
-        run: cargo build --release --locked -p heimdall-app
+        shell: pwsh
+        run: |
+          cargo build --release --locked -p heimdall-app
+          cargo build --release --locked -p heimdall-app --features console --target-dir target/console
+          New-Item -ItemType Directory bin | Out-Null
+          Copy-Item target/release/heimdall.exe bin/heimdall.exe
+          Copy-Item target/console/release/heimdall.exe bin/heimdall.com
       - name: Check that only system DLLs are needed
         shell: pwsh
         run: |
           $vswhere = "${env:ProgramFiles(x86)}/Microsoft Visual Studio/Installer/vswhere.exe"
           $vs = & $vswhere -latest -products * -property installationPath
           $dumpbin = Get-ChildItem "$vs/VC/Tools/MSVC/*/bin/Hostx64/x64/dumpbin.exe" | Select-Object -First 1
-          $deps = & $dumpbin.FullName /dependents target/release/heimdall.exe | Select-String '\.dll'
-          $deps
-          if ($deps -match 'vcruntime|msvcp|api-ms-win-crt|ucrtbase') { throw "heimdall.exe depends on the C runtime DLLs" }
+          foreach ($file in 'bin/heimdall.exe', 'bin/heimdall.com') {
+            $deps = & $dumpbin.FullName /dependents $file | Select-String '\.dll'
+            $deps
+            if ($deps -match 'vcruntime|msvcp|api-ms-win-crt|ucrtbase') { throw "$file depends on the C runtime DLLs" }
+          }
       - name: Keep the unsigned build
         id: unsigned
         uses: actions/upload-artifact@v7
         with:
           name: heimdall-unsigned
-          path: target/release/heimdall.exe
+          path: bin/
           if-no-files-found: error
       # Code signing through SignPath Foundation (free for open source).
       # Runs only once the project is approved and the repository has the
@@ -64,12 +76,55 @@ jobs:
       - name: Collect
         shell: pwsh
         run: |
-          New-Item -ItemType Directory dist | Out-Null
           if (Test-Path signed/heimdall.exe) {
-            Copy-Item signed/heimdall.exe dist/
-          } else {
-            Copy-Item target/release/heimdall.exe dist/
+            Copy-Item signed/heimdall.exe, signed/heimdall.com bin/ -Force
           }
+      - name: Install Inno Setup
+        # Pinned by version and hash, like appimagetool on Linux.
+        shell: pwsh
+        env:
+          INNO_URL: https://github.com/jrsoftware/issrc/releases/download/is-6_7_3/innosetup-6.7.3.exe
+          INNO_SHA256: 9c73c3bae7ed48d44112a0f48e66742c00090bdb5bef71d9d3c056c66e97b732
+        run: |
+          $setup = "$env:RUNNER_TEMP/innosetup.exe"
+          Invoke-WebRequest $env:INNO_URL -OutFile $setup
+          if ((Get-FileHash $setup -Algorithm SHA256).Hash -ne $env:INNO_SHA256) { throw "Inno Setup hash mismatch" }
+          Start-Process $setup -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/CURRENTUSER', "/DIR=$env:RUNNER_TEMP\inno" -Wait
+          if (-not (Test-Path "$env:RUNNER_TEMP\inno\ISCC.exe")) { throw "Inno Setup didn't install" }
+      - name: Package
+        # The installer (per user, adds heimdall to the PATH) and a zip with
+        # both programs for those who'd rather not install.
+        shell: pwsh
+        run: |
+          $version = $env:GITHUB_REF_NAME.TrimStart('v')
+          New-Item -ItemType Directory dist | Out-Null
+          $zip = "heimdall-$version-windows-x86_64"
+          New-Item -ItemType Directory $zip | Out-Null
+          Copy-Item bin/heimdall.exe, bin/heimdall.com, README.md $zip/
+          Copy-Item LICENSE $zip/LICENSE.txt
+          Compress-Archive $zip "dist/$zip.zip"
+          & "$env:RUNNER_TEMP\inno\ISCC.exe" /Q "/DAppVersion=$version" "/DBinDir=$PWD\bin" "/DOutDir=$PWD\dist" packaging\windows\heimdall.iss
+          if ($LASTEXITCODE -ne 0) { throw "ISCC failed" }
+          Get-ChildItem dist
+      # TODO when SignPath is approved: sign dist/heimdall-*-setup.exe too.
+      - name: Check the installer
+        # Installs, runs heimdall from the PATH it set, uninstalls, and
+        # checks nothing is left (vaults and settings are never touched).
+        shell: pwsh
+        run: |
+          $version = $env:GITHUB_REF_NAME.TrimStart('v')
+          $dir = "$env:RUNNER_TEMP\heimdall-test"
+          $before = (Get-ItemProperty HKCU:\Environment).Path
+          $p = Start-Process "dist/heimdall-$version-setup.exe" -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', "/DIR=$dir", '/TASKS=path,startmenu' -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "setup failed: $($p.ExitCode)" }
+          $path = (Get-ItemProperty HKCU:\Environment).Path
+          if (-not (($path -split ';') -contains $dir)) { throw "the folder isn't on the PATH" }
+          $out = & cmd /c "set PATH=$dir;%PATH% && heimdall --version"
+          if ($out -ne "heimdall $version") { throw "heimdall --version said: $out" }
+          $p = Start-Process "$dir\unins000.exe" -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART' -Wait -PassThru
+          Start-Sleep -Seconds 3
+          if (Test-Path "$dir\heimdall.exe") { throw "uninstall left heimdall.exe" }
+          if ((Get-ItemProperty HKCU:\Environment).Path -ne $before) { throw "uninstall didn't restore the PATH" }
       - uses: actions/upload-artifact@v7
         with:
           name: dist-windows
@@ -236,7 +291,8 @@ jobs:
         uses: actions/attest-build-provenance@v4
         with:
           subject-path: |
-            dist/heimdall.exe
+            dist/*-setup.exe
+            dist/*.zip
             dist/*.AppImage
             dist/*.tar.gz
             dist/*.deb
